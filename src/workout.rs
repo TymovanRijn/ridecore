@@ -88,7 +88,8 @@ impl Workout {
 
     pub fn parse(xml: &str) -> Result<Self> {
         let mut reader = Reader::from_str(xml);
-        reader.config_mut().trim_text(true);
+        // Untrimmed: a name like "A & B" arrives in pieces around the `&amp;`.
+        reader.config_mut().trim_text(false);
         let mut name = String::new();
         let mut segments = Vec::new();
         let mut in_name = false;
@@ -97,7 +98,16 @@ impl Workout {
             match reader.read_event().context("invalid workout XML")? {
                 Event::Start(e) if e.name().as_ref() == "name" => in_name = true,
                 Event::End(e) if e.name().as_ref() == "name" => in_name = false,
-                Event::Text(t) if in_name => name = t.xml10_content().into_owned(),
+                Event::Text(t) if in_name => name.push_str(&t.xml10_content()),
+                // `&amp;` and friends arrive as separate events.
+                Event::GeneralRef(r) if in_name => name.push_str(match r.as_ref() {
+                    "amp" => "&",
+                    "lt" => "<",
+                    "gt" => ">",
+                    "quot" => "\"",
+                    "apos" => "'",
+                    _ => "",
+                }),
                 Event::Start(e) if e.name().as_ref() == "workout" => in_workout = true,
                 Event::End(e) if e.name().as_ref() == "workout" => in_workout = false,
                 Event::Start(e) | Event::Empty(e) if in_workout => {
@@ -110,6 +120,7 @@ impl Workout {
         if segments.is_empty() {
             bail!("workout has no segments");
         }
+        let name = name.trim().to_string();
         Ok(Workout { name, segments })
     }
 }

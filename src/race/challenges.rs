@@ -294,7 +294,10 @@ impl ChallengeTracker {
         options.push(mk(
             Kind::Effort { watts, secs: 15.0 },
             t("Versnelling", "Surge"),
-            tf!("Trap 15 s boven {watts:.0} W", "Ride above {watts:.0} W for 15 s"),
+            tf!(
+                "Trap 15 s boven {watts:.0} W",
+                "Ride above {watts:.0} W for 15 s"
+            ),
             80,
             30.0,
         ));
@@ -334,7 +337,11 @@ impl ChallengeTracker {
             options.push(mk(
                 Kind::Pull { secs: 20.0 },
                 t("Kopwerk", "Pull"),
-                t("Trek 20 s op kop van je groep", "Ride on the front of your group for 20 s").into(),
+                t(
+                    "Trek 20 s op kop van je groep",
+                    "Ride on the front of your group for 20 s",
+                )
+                .into(),
                 70,
                 50.0,
             ));

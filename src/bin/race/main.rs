@@ -1,6 +1,7 @@
 //! RideCore race mode: a single-player 3D road race on your smart trainer
 //! against AI teams.
 
+mod builder;
 mod camera;
 mod captions;
 mod climb;

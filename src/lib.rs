@@ -4,9 +4,10 @@
 pub mod ble;
 pub mod card;
 pub mod click;
+pub mod custom;
 pub mod fit;
-pub mod i18n;
 pub mod ftms;
+pub mod i18n;
 pub mod map;
 pub mod physics;
 pub mod profile;

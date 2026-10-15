@@ -1,8 +1,8 @@
 //! Builds the start list: teams with a strength (mean FTP in W/kg and a
 //! spread), and riders of different types sampled from that strength.
 
-use crate::physics::{BikeParams, CD, frontal_area_m2};
 use crate::i18n::t;
+use crate::physics::{BikeParams, CD, frontal_area_m2};
 use crate::rng::Rng;
 
 use super::energy::Energy;

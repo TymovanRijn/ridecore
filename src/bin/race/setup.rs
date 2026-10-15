@@ -4,15 +4,17 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
+use ridecore::custom::{self, CustomWorkout};
 use ridecore::i18n::{self, Lang, t};
 use ridecore::profile::Profile;
-use ridecore::tf;
 use ridecore::race::course::find_climbs;
 use ridecore::race::field::{RiderKind, TeamSpec, rival_teams};
 use ridecore::race::{PlayerSetup, Race, RaceConfig};
 use ridecore::route::Route;
+use ridecore::tf;
 use ridecore::training::{Focus, Plan, library};
 
+use crate::builder::{Action, Builder, builder_ui};
 use crate::link::{InputSettings, Trainer};
 use crate::theme::{self, ACCENT, ACCENT_SOFT, MUTED, TEXT, card, chip, display, stat};
 use crate::{RaceRes, Screen};
@@ -60,6 +62,15 @@ pub struct SetupForm {
     /// Ride the workout as a game instead of in ERG.
     pub game: Option<crate::games::GameKind>,
     focus_filter: Option<Focus>,
+    /// Show only your own workouts.
+    mine_only: bool,
+    /// Workouts you built, and the one being edited.
+    pub customs: Vec<CustomWorkout>,
+    pub builder: Option<Builder>,
+    /// A custom workout waiting for a second click to be deleted.
+    confirm_delete: Option<String>,
+    /// A short message under the workout (export, import).
+    notice: Option<String>,
     /// Saved between sessions: profile and training log.
     pub profile: Profile,
 }
@@ -119,6 +130,16 @@ impl Default for SetupForm {
             workout: 0,
             game: None,
             focus_filter: None,
+            mine_only: false,
+            // Screenshot runs never see or touch your own workouts.
+            customs: if std::env::var_os("RIDECORE_SHOTS").is_some() {
+                Vec::new()
+            } else {
+                custom::load_all()
+            },
+            builder: None,
+            confirm_delete: None,
+            notice: None,
             profile,
         };
         form.infos = form.routes.iter().map(RouteInfo::of).collect();
@@ -126,6 +147,22 @@ impl Default for SetupForm {
         if std::env::var("RIDECORE_MODE").is_ok_and(|m| m == "training") {
             form.mode = PlayMode::Training;
             form.workout = 1;
+        }
+        // `RIDECORE_BUILDER=1` opens the builder on an example (screenshots).
+        if std::env::var_os("RIDECORE_BUILDER").is_some() {
+            form.mode = PlayMode::Training;
+            let mut w = CustomWorkout::new("Dinsdag-intervallen");
+            let tpls = custom::templates();
+            for k in [0, 3, 10, 5, 1] {
+                w.blocks.push(w.template_block(&tpls[k].block, form.ftp));
+            }
+            w.notes = "Rustig opbouwen, en de 4 × 4 vol houden op 95 rpm.".into();
+            // `RIDECORE_BUILDER=list` shows it saved in the library instead.
+            if std::env::var("RIDECORE_BUILDER").is_ok_and(|v| v == "list") {
+                form.save_custom(w);
+            } else {
+                form.builder = Some(Builder::new(w, true));
+            }
         }
         form.regenerate();
         form
@@ -136,7 +173,49 @@ impl SetupForm {
     fn regenerate(&mut self) {
         self.teams = rival_teams(self.team_count, self.ftp / self.kg, self.difficulty);
         self.player_team = self.player_team.min(self.team_count - 1);
+        let id = self.plans.get(self.workout).map(|p| p.id.clone());
         self.plans = library(self.ftp);
+        self.plans
+            .extend(self.customs.iter().map(|w| w.to_plan(self.ftp)));
+        if let Some(id) = id {
+            self.select_plan(&id);
+        }
+    }
+
+    fn select_plan(&mut self, id: &str) {
+        if let Some(i) = self.plans.iter().position(|p| p.id == id) {
+            self.workout = i;
+        }
+    }
+
+    fn write_customs(&mut self) {
+        if std::env::var_os("RIDECORE_SHOTS").is_some() {
+            return;
+        }
+        if let Err(e) = custom::save_all(&self.customs) {
+            self.notice = Some(tf!("Opslaan mislukt: {e}", "Saving failed: {e}"));
+        }
+    }
+
+    /// Adds or replaces a custom workout, saves, and selects it.
+    pub fn save_custom(&mut self, w: CustomWorkout) {
+        let id = w.id.clone();
+        match self.customs.iter_mut().find(|c| c.id == id) {
+            Some(c) => *c = w,
+            None => self.customs.push(w),
+        }
+        self.write_customs();
+        self.regenerate();
+        self.select_plan(&id);
+        self.mine_only = false;
+        self.focus_filter = None;
+    }
+
+    fn delete_custom(&mut self, id: &str) {
+        self.customs.retain(|c| c.id != id);
+        self.write_customs();
+        self.workout = 0;
+        self.regenerate();
     }
 
     /// Writes name, FTP, weight and role back to the profile on disk.
@@ -235,6 +314,7 @@ impl Plugin for SetupPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SetupForm>()
             .add_systems(Startup, autostart)
+            .add_systems(Update, import_dropped.run_if(in_state(Screen::Setup)))
             .add_systems(
                 EguiPrimaryContextPass,
                 setup_ui
@@ -277,8 +357,8 @@ fn autostart(
         form.game = std::env::var("RIDECORE_GAME")
             .ok()
             .and_then(|g| crate::games::GameKind::from_id(&g));
-        let mut session = crate::training::Session::new(form.plans[i].clone(), form.ftp)
-            .with_game(form.game);
+        let mut session =
+            crate::training::Session::new(form.plans[i].clone(), form.ftp).with_game(form.game);
         if let Some(skip) = std::env::var("RIDECORE_SKIP_S")
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
@@ -337,6 +417,31 @@ fn setup_ui(
         form.set_lang(lang);
     }
     ui.add_space(10.0);
+    // The workout builder takes the whole screen under the title.
+    if form.builder.is_some() {
+        ui.label(
+            egui::RichText::new(i18n::t("TRAININGSBOUWER", "WORKOUT BUILDER"))
+                .font(display(26.0))
+                .color(ACCENT),
+        );
+        ui.add_space(6.0);
+        let ftp = form.ftp;
+        let action = form
+            .builder
+            .as_mut()
+            .map_or(Action::None, |b| builder_ui(ui, b, ftp));
+        match action {
+            Action::None => {}
+            Action::Cancel => form.builder = None,
+            Action::Save => {
+                if let Some(b) = form.builder.take() {
+                    form.notice = Some(tf!("“{}” opgeslagen", "“{}” saved", b.workout.name));
+                    form.save_custom(b.workout);
+                }
+            }
+        }
+        return Ok(());
+    }
     mode_tabs(ui, &mut form);
     ui.add_space(12.0);
 
@@ -616,7 +721,13 @@ fn rider_card(ui: &mut egui::Ui, form: &mut SetupForm) {
         ui.horizontal(|ui| {
             for (label, value, range, suffix, speed) in [
                 ("FTP", &mut form.ftp, 80.0..=600.0, " W", 1.0),
-                (t("Gewicht", "Weight"), &mut form.kg, 35.0..=160.0, " kg", 0.1),
+                (
+                    t("Gewicht", "Weight"),
+                    &mut form.kg,
+                    35.0..=160.0,
+                    " kg",
+                    0.1,
+                ),
             ] {
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(label).small().color(MUTED));
@@ -631,7 +742,11 @@ fn rider_card(ui: &mut egui::Ui, form: &mut SetupForm) {
                 });
             }
             ui.vertical(|ui| {
-                ui.label(egui::RichText::new(t("Lengte", "Height")).small().color(MUTED));
+                ui.label(
+                    egui::RichText::new(t("Lengte", "Height"))
+                        .small()
+                        .color(MUTED),
+                );
                 ui.add(
                     egui::DragValue::new(&mut form.height_cm)
                         .range(140.0..=215.0)
@@ -640,7 +755,11 @@ fn rider_card(ui: &mut egui::Ui, form: &mut SetupForm) {
             });
         });
         ui.add_space(6.0);
-        ui.label(egui::RichText::new(t("Rol in de ploeg", "Role in the team")).small().color(MUTED));
+        ui.label(
+            egui::RichText::new(t("Rol in de ploeg", "Role in the team"))
+                .small()
+                .color(MUTED),
+        );
         ui.horizontal(|ui| {
             for k in KINDS {
                 if ui.selectable_label(form.kind == k, k.label()).clicked() {
@@ -708,7 +827,10 @@ fn course_card(ui: &mut egui::Ui, form: &mut SetupForm) {
     card(ui, t("Parcours", "Course"), |ui| {
         ui.add(
             egui::TextEdit::singleline(&mut form.route_filter)
-                .hint_text(t("Zoek: Alpe, Italië, Dolomieten…", "Search: Alpe, Italy, Dolomites…"))
+                .hint_text(t(
+                    "Zoek: Alpe, Italië, Dolomieten…",
+                    "Search: Alpe, Italy, Dolomites…",
+                ))
                 .desired_width(f32::INFINITY),
         );
         ui.add_space(6.0);
@@ -751,7 +873,12 @@ fn course_card(ui: &mut egui::Ui, form: &mut SetupForm) {
         ui.horizontal(|ui| {
             stat(ui, format!("{:.1}", route.length_m() / 1000.0), "km", TEXT);
             ui.add_space(8.0);
-            stat(ui, format!("{:.0}", route.gain_m()), t("hoogtemeters", "elevation m"), TEXT);
+            stat(
+                ui,
+                format!("{:.0}", route.gain_m()),
+                t("hoogtemeters", "elevation m"),
+                TEXT,
+            );
             ui.add_space(8.0);
             stat(
                 ui,
@@ -947,7 +1074,11 @@ fn field_card(ui: &mut egui::Ui, form: &mut SetupForm) {
             ui.add(egui::DragValue::new(&mut form.riders_per_team).range(4..=8));
         });
         ui.add_space(6.0);
-        ui.label(egui::RichText::new(t("Kies je ploeg", "Pick your team")).small().color(MUTED));
+        ui.label(
+            egui::RichText::new(t("Kies je ploeg", "Pick your team"))
+                .small()
+                .color(MUTED),
+        );
         let max_wkg = form.teams.iter().map(|t| t.mean_wkg).fold(0.1, f32::max);
         let mut pick = None;
         for (i, team) in form.teams.iter().enumerate() {
@@ -1007,7 +1138,10 @@ fn field_card(ui: &mut egui::Ui, form: &mut SetupForm) {
             if ui.button(t("Opnieuw verdelen", "Reshuffle")).clicked() {
                 regen = true;
             }
-            ui.toggle_value(&mut form.show_team_editor, t("Ploegen aanpassen", "Edit teams"));
+            ui.toggle_value(
+                &mut form.show_team_editor,
+                t("Ploegen aanpassen", "Edit teams"),
+            );
         });
         if form.show_team_editor {
             egui::Grid::new("teams-edit")
@@ -1126,7 +1260,10 @@ fn mode_tabs(ui: &mut egui::Ui, form: &mut SetupForm) {
             (
                 PlayMode::Training,
                 t("TRAINING", "WORKOUT"),
-                t("Intervallen in ERG of als spel", "Intervals in ERG or as a game"),
+                t(
+                    "Intervallen in ERG of als spel",
+                    "Intervals in ERG or as a game",
+                ),
             ),
         ] {
             let selected = form.mode == mode;
@@ -1175,8 +1312,33 @@ fn mode_tabs(ui: &mut egui::Ui, form: &mut SetupForm) {
 /// The workout library, filterable by what you want to improve.
 fn library_card(ui: &mut egui::Ui, form: &mut SetupForm) {
     card(ui, t("Trainingen", "Workouts"), |ui| {
+        if ui
+            .add_sized(
+                [ui.available_width(), 38.0],
+                egui::Button::new(
+                    egui::RichText::new(t("+  NIEUWE TRAINING BOUWEN", "+  BUILD A NEW WORKOUT"))
+                        .font(display(19.0))
+                        .color(egui::Color32::WHITE),
+                )
+                .fill(ACCENT.gamma_multiply(0.85)),
+            )
+            .clicked()
+        {
+            form.builder = Some(Builder::new(
+                CustomWorkout::new(t("Mijn training", "My workout")),
+                true,
+            ));
+        }
+        ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+            if !form.customs.is_empty()
+                && ui
+                    .selectable_label(form.mine_only, t("★ Eigen", "★ Mine"))
+                    .clicked()
+            {
+                form.mine_only = !form.mine_only;
+            }
             for (focus, label) in [
                 (None, t("Alles", "All")),
                 (Some(Focus::Vo2max), "VO2max"),
@@ -1186,26 +1348,37 @@ fn library_card(ui: &mut egui::Ui, form: &mut SetupForm) {
                 (Some(Focus::Test), "Test"),
             ] {
                 if ui
-                    .selectable_label(form.focus_filter == focus, label)
+                    .selectable_label(!form.mine_only && form.focus_filter == focus, label)
                     .clicked()
                 {
                     form.focus_filter = focus;
+                    form.mine_only = false;
                 }
             }
         });
         ui.add_space(6.0);
         let mut pick = None;
-        for (i, plan) in form.plans.iter().enumerate() {
-            let shown = match form.focus_filter {
-                None => true,
-                Some(Focus::Endurance) => {
-                    matches!(plan.focus, Focus::Endurance | Focus::Recovery)
-                }
-                Some(Focus::Threshold) => {
-                    matches!(plan.focus, Focus::Threshold | Focus::SweetSpot)
-                }
-                Some(f) => plan.focus == f,
-            };
+        // Your own workouts first, newest on top.
+        let n = form.plans.len();
+        let mine = n - form.customs.len().min(n);
+        let order = (mine..n).rev().chain(0..mine);
+        for i in order {
+            let plan = &form.plans[i];
+            let own = i >= mine;
+            if form.mine_only && !own {
+                continue;
+            }
+            let shown = form.mine_only
+                || match form.focus_filter {
+                    None => true,
+                    Some(Focus::Endurance) => {
+                        matches!(plan.focus, Focus::Endurance | Focus::Recovery)
+                    }
+                    Some(Focus::Threshold) => {
+                        matches!(plan.focus, Focus::Threshold | Focus::SweetSpot)
+                    }
+                    Some(f) => plan.focus == f,
+                };
             if shown && crate::training::plan_tile(ui, plan, form.workout == i) {
                 pick = Some(i);
             }
@@ -1227,9 +1400,19 @@ fn week_card(ui: &mut egui::Ui, form: &SetupForm) {
     let week = form.profile.week_tss(now);
     card(ui, t("Jouw week", "Your week"), |ui| {
         ui.horizontal(|ui| {
-            stat(ui, streak.to_string(), t("dagen op rij", "day streak"), ACCENT);
+            stat(
+                ui,
+                streak.to_string(),
+                t("dagen op rij", "day streak"),
+                ACCENT,
+            );
             ui.add_space(14.0);
-            stat(ui, format!("{week:.0}"), t("tss deze week", "tss this week"), TEXT);
+            stat(
+                ui,
+                format!("{week:.0}"),
+                t("tss deze week", "tss this week"),
+                TEXT,
+            );
             ui.add_space(14.0);
             stat(
                 ui,
@@ -1264,7 +1447,135 @@ fn training_card(ui: &mut egui::Ui, form: &mut SetupForm) {
     let plan = form.plans[form.workout.min(form.plans.len() - 1)].clone();
     card(ui, t("Training", "Workout"), |ui| {
         crate::training::plan_detail(ui, &plan, form.ftp);
+        ui.add_space(8.0);
+        plan_actions(ui, form, &plan);
+        if let Some(note) = &form.notice {
+            ui.label(egui::RichText::new(note).small().color(ACCENT_SOFT));
+        }
     });
+}
+
+/// Edit, copy, export or delete your own workout; or turn a library
+/// workout into one of your own.
+fn plan_actions(ui: &mut egui::Ui, form: &mut SetupForm, plan: &ridecore::training::Plan) {
+    let ftp = form.ftp;
+    let Some(k) = form.customs.iter().position(|c| c.id == plan.id) else {
+        if !plan.ramp_test
+            && ui
+                .button(t("Aanpassen als eigen training", "Customise as your own"))
+                .on_hover_text(t(
+                    "Maakt een kopie die je in de bouwer kunt aanpassen.",
+                    "Makes a copy you can change in the builder.",
+                ))
+                .clicked()
+        {
+            let mut w = CustomWorkout::from_segments(
+                &tf!("{} (eigen)", "{} (mine)", plan.name),
+                &plan.workout.segments,
+            );
+            w.notes = plan.summary.clone();
+            form.builder = Some(Builder::new(w, true));
+        }
+        return;
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+        if ui.button(t("Bewerken", "Edit")).clicked() {
+            form.builder = Some(Builder::new(form.customs[k].clone(), false));
+            form.notice = None;
+        }
+        if ui.button(t("Dupliceren", "Duplicate")).clicked() {
+            let mut copy =
+                CustomWorkout::new(&tf!("{} (kopie)", "{} (copy)", form.customs[k].name));
+            copy.unit = form.customs[k].unit;
+            copy.blocks = form.customs[k].blocks.clone();
+            copy.notes = form.customs[k].notes.clone();
+            form.notice = Some(t("Kopie gemaakt", "Copy made").into());
+            form.save_custom(copy);
+            return;
+        }
+        if ui
+            .button(t("Exporteer .zwo", "Export .zwo"))
+            .on_hover_text(t(
+                "Een Zwift-bestand, ook te gebruiken in andere apps.",
+                "A Zwift file, works in other apps too.",
+            ))
+            .clicked()
+        {
+            form.notice = Some(match custom::export(&form.customs[k], ftp) {
+                Ok(path) => {
+                    crate::share::reveal(&path);
+                    tf!("Opgeslagen: {}", "Saved: {}", path.display())
+                }
+                Err(e) => tf!("Exporteren mislukt: {e}", "Export failed: {e}"),
+            });
+        }
+        let id = form.customs[k].id.clone();
+        let armed = form.confirm_delete.as_deref() == Some(id.as_str());
+        let label = if armed {
+            t("Zeker weten? Klik nog eens", "Sure? Click again")
+        } else {
+            t("Verwijderen", "Delete")
+        };
+        if ui
+            .button(egui::RichText::new(label).color(if armed {
+                egui::Color32::from_rgb(255, 110, 90)
+            } else {
+                MUTED
+            }))
+            .clicked()
+        {
+            if armed {
+                form.confirm_delete = None;
+                form.notice = None;
+                form.delete_custom(&id);
+            } else {
+                form.confirm_delete = Some(id);
+            }
+        }
+    });
+}
+
+/// A `.zwo` file dropped on the window becomes one of your workouts.
+fn import_dropped(
+    mut drops: MessageReader<bevy::window::FileDragAndDrop>,
+    mut form: ResMut<SetupForm>,
+) {
+    for d in drops.read() {
+        let bevy::window::FileDragAndDrop::DroppedFile { path_buf, .. } = d else {
+            continue;
+        };
+        if !path_buf
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("zwo"))
+        {
+            form.notice = Some(
+                t(
+                    "Alleen .zwo-bestanden kunnen worden geïmporteerd.",
+                    "Only .zwo files can be imported.",
+                )
+                .into(),
+            );
+            continue;
+        }
+        let stem = path_buf
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let read = std::fs::read_to_string(path_buf)
+            .map_err(anyhow::Error::from)
+            .and_then(|xml| CustomWorkout::from_zwo(&xml, &stem));
+        form.mode = PlayMode::Training;
+        match read {
+            Ok(w) => {
+                form.notice = Some(tf!("Geïmporteerd: {}", "Imported: {}", w.name));
+                form.save_custom(w);
+            }
+            Err(e) => {
+                form.notice = Some(tf!("Importeren mislukt: {e:#}", "Import failed: {e:#}"));
+            }
+        }
+    }
 }
 
 /// Where to ride it, and the start button. Returns true when pressed.
@@ -1273,7 +1584,10 @@ fn training_start(ui: &mut egui::Ui, form: &mut SetupForm, can_start: bool, t: f
         // How to ride it: on a road in ERG, or as a game.
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            if ui.selectable_label(form.game.is_none(), "Route (ERG)").clicked() {
+            if ui
+                .selectable_label(form.game.is_none(), "Route (ERG)")
+                .clicked()
+            {
                 form.game = None;
             }
             for kind in crate::games::GameKind::ALL {

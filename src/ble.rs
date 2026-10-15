@@ -174,8 +174,12 @@ async fn session(
     // kind is kept: a grade that's already outdated is never sent.
     let outbox = Arc::new(Outbox::default());
     let mut writer = tokio::spawn({
-        let (trainer, control, outbox, hub) =
-            (trainer.clone(), control.clone(), outbox.clone(), hub.clone());
+        let (trainer, control, outbox, hub) = (
+            trainer.clone(),
+            control.clone(),
+            outbox.clone(),
+            hub.clone(),
+        );
         async move {
             loop {
                 let next = outbox.queue.lock().expect("outbox lock").pop_front();
@@ -189,7 +193,9 @@ async fn session(
                             let Some(bytes) = zwift_hub::encode(&req) else {
                                 return Ok(());
                             };
-                            trainer.write(rx, &bytes, WriteType::WithoutResponse).await?;
+                            trainer
+                                .write(rx, &bytes, WriteType::WithoutResponse)
+                                .await?;
                             trainer
                                 .write(rx, &zwift_hub::SETTINGS_REQUEST, WriteType::WithoutResponse)
                                 .await
@@ -370,7 +376,11 @@ fn log_battery(raw: &[u8], level: u8) {
         return;
     };
     let path = std::path::Path::new(&home).join("Library/Logs/RideCore-click-battery.log");
-    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) else {
+    let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
         return;
     };
     let unix = std::time::SystemTime::now()

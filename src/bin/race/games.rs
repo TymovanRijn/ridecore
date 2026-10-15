@@ -213,7 +213,8 @@ impl Game {
             GameKind::Balloon => tf!(
                 "{} munten · langste reeks {}",
                 "{} coins · longest streak {}",
-                self.score, self.best_streak
+                self.score,
+                self.best_streak
             ),
             GameKind::Pizza => tf!(
                 "{} van {} pizza's geserveerd",
@@ -232,12 +233,14 @@ impl Game {
 
     /// Jumps ahead (for testing) without judging the rounds skipped.
     pub fn skip_to(&mut self, elapsed: f32) {
-        while self.rounds.get(self.round).is_some_and(|r| r.end <= elapsed) {
+        while self
+            .rounds
+            .get(self.round)
+            .is_some_and(|r| r.end <= elapsed)
+        {
             self.round += 1;
         }
-        self.next_coin = self
-            .next_coin
-            .max((elapsed / COIN_EVERY_S).ceil() as usize);
+        self.next_coin = self.next_coin.max((elapsed / COIN_EVERY_S).ceil() as usize);
     }
 
     /// Lets the animations run while paused or between rounds.
@@ -293,9 +296,7 @@ impl Game {
             self.reel = self.reel.clamp(0.0, 1.0);
         }
 
-        while self.next_coin < self.coins.len()
-            && self.next_coin as f32 * COIN_EVERY_S <= elapsed
-        {
+        while self.next_coin < self.coins.len() && self.next_coin as f32 * COIN_EVERY_S <= elapsed {
             let got = (self.power - target).abs() <= band(target);
             self.coins[self.next_coin] = if got {
                 Coin::Got(self.clock)
@@ -327,9 +328,15 @@ impl Game {
         let variety = self.shelf.len() * 7 % 6;
         let pct = (share * 100.0).round();
         let hint = if self.over > self.under {
-            t("Te veel vermogen: schakel lichter", "Too much power: shift easier")
+            t(
+                "Te veel vermogen: schakel lichter",
+                "Too much power: shift easier",
+            )
         } else {
-            t("Te weinig vermogen: schakel zwaarder", "Too little power: shift harder")
+            t(
+                "Te weinig vermogen: schakel zwaarder",
+                "Too little power: shift harder",
+            )
         };
         let (title, sub) = match (self.kind, won) {
             (GameKind::Balloon, true) => {
@@ -347,14 +354,20 @@ impl Game {
                     ),
                 )
             }
-            (GameKind::Balloon, false) => (t("Uit koers geraakt", "Blown off course").into(), hint.to_string()),
+            (GameKind::Balloon, false) => (
+                t("Uit koers geraakt", "Blown off course").into(),
+                hint.to_string(),
+            ),
             (GameKind::Pizza, true) => (
                 if share > 0.9 {
                     tf!("{} perfect!", "{} perfect!", PIZZAS[variety])
                 } else {
                     tf!("{} is klaar!", "{} is ready!", PIZZAS[variety])
                 },
-                tf!("{pct:.0}% op de juiste temperatuur", "{pct:.0}% at the right temperature"),
+                tf!(
+                    "{pct:.0}% op de juiste temperatuur",
+                    "{pct:.0}% at the right temperature"
+                ),
             ),
             (GameKind::Pizza, false) if burnt => (
                 t("Aangebrand!", "Burnt!").into(),
@@ -441,7 +454,8 @@ impl Game {
                 GameKind::Balloon => tf!(
                     "reeks {} · beste {}",
                     "streak {} · best {}",
-                    self.streak, self.best_streak
+                    self.streak,
+                    self.best_streak
                 ),
                 _ => {
                     let lost = self.shelf.len() as u32 - self.rounds_won;
@@ -472,7 +486,10 @@ impl Game {
     ) {
         let top = screen.top() + 290.0;
         let bottom = (screen.bottom() - 190.0).max(top + 220.0);
-        let area = Rect::from_min_max(pos2(screen.left() + 40.0, top), pos2(screen.right() - 40.0, bottom));
+        let area = Rect::from_min_max(
+            pos2(screen.left() + 40.0, top),
+            pos2(screen.right() - 40.0, bottom),
+        );
         match self.kind {
             GameKind::Balloon => self.draw_balloon(p, screen, area, elapsed, target, target_at),
             GameKind::Pizza => self.draw_pizza(p, screen, area, elapsed, target),
@@ -529,8 +546,7 @@ impl Game {
         for i in 0..9 {
             let depth = 0.4 + (i % 3) as f32 * 0.3;
             let span = screen.width() + 400.0;
-            let x = screen.right() + 200.0
-                - ((i as f32 * 523.0 + elapsed * 18.0 * depth) % span);
+            let x = screen.right() + 200.0 - ((i as f32 * 523.0 + elapsed * 18.0 * depth) % span);
             let y = screen.top() + 120.0 + (i as f32 * 211.0 % (screen.height() * 0.6));
             cloud(p, pos2(x, y), 26.0 * depth + 14.0, (150.0 * depth) as u8);
         }
@@ -541,7 +557,8 @@ impl Game {
         ] {
             let r = screen.width() * 0.35;
             for k in -1..5 {
-                let x = screen.left() + (k as f32 * r * 1.3 - elapsed * speed).rem_euclid(r * 6.5) - r;
+                let x =
+                    screen.left() + (k as f32 * r * 1.3 - elapsed * speed).rem_euclid(r * 6.5) - r;
                 let y = screen.bottom() + r * (1.0 - h * 3.0) + layer as f32 * 30.0;
                 p.circle_filled(pos2(x, y), r, color);
             }
@@ -635,10 +652,17 @@ impl Game {
         let env = pos2(bx, by - 46.0);
         let rope = Color32::from_rgb(90, 60, 40);
         for dx in [-12.0, 12.0] {
-            p.line_segment([env + vec2(dx * 1.6, 22.0), pos2(bx + dx * 0.7, by + 4.0)], Stroke::new(1.5, rope));
+            p.line_segment(
+                [env + vec2(dx * 1.6, 22.0), pos2(bx + dx * 0.7, by + 4.0)],
+                Stroke::new(1.5, rope),
+            );
         }
         p.add(Shape::ellipse_filled(env, vec2(34.0, 40.0), ACCENT));
-        p.add(Shape::ellipse_filled(env, vec2(19.0, 40.0), Color32::from_rgb(255, 214, 120)));
+        p.add(Shape::ellipse_filled(
+            env,
+            vec2(19.0, 40.0),
+            Color32::from_rgb(255, 214, 120),
+        ));
         p.add(Shape::ellipse_filled(env, vec2(6.0, 40.0), ACCENT));
         p.add(Shape::ellipse_filled(
             env + vec2(-14.0, -16.0),
@@ -655,15 +679,25 @@ impl Game {
             if self.power > t + b {
                 let f = (self.clock * 20.0).sin() * 3.0;
                 p.add(Shape::convex_polygon(
-                    vec![pos2(bx - 6.0, by - 2.0), pos2(bx, by - 22.0 - f), pos2(bx + 6.0, by - 2.0)],
+                    vec![
+                        pos2(bx - 6.0, by - 2.0),
+                        pos2(bx, by - 22.0 - f),
+                        pos2(bx + 6.0, by - 2.0),
+                    ],
                     Color32::from_rgb(255, 170, 40),
                     Stroke::NONE,
                 ));
             }
             let hint = if self.power > t + b {
-                Some((ridecore::i18n::t("Lager! Minder vermogen", "Lower! Less power"), WARN))
+                Some((
+                    ridecore::i18n::t("Lager! Minder vermogen", "Lower! Less power"),
+                    WARN,
+                ))
             } else if self.power < t - b {
-                Some((ridecore::i18n::t("Hoger! Meer vermogen", "Higher! More power"), WARN))
+                Some((
+                    ridecore::i18n::t("Hoger! Meer vermogen", "Higher! More power"),
+                    WARN,
+                ))
             } else {
                 None
             };
@@ -698,7 +732,10 @@ impl Game {
             );
             let mut x = screen.left() - off;
             while x < screen.right() {
-                p.line_segment([pos2(x, y), pos2(x, y + bh)], Stroke::new(2.0, Color32::from_black_alpha(60)));
+                p.line_segment(
+                    [pos2(x, y), pos2(x, y + bh)],
+                    Stroke::new(2.0, Color32::from_black_alpha(60)),
+                );
                 x += 80.0;
             }
             y += bh;
@@ -710,7 +747,11 @@ impl Game {
         let heat = self.heat.clamp(0.0, 1.6);
         // The oven: a stone dome with a glowing mouth.
         p.circle_filled(c, r * 1.12, Color32::from_rgb(140, 124, 110));
-        p.circle_stroke(c, r * 1.12, Stroke::new(6.0, Color32::from_rgb(105, 92, 80)));
+        p.circle_stroke(
+            c,
+            r * 1.12,
+            Stroke::new(6.0, Color32::from_rgb(105, 92, 80)),
+        );
         let mouth = c + vec2(0.0, r * 0.25);
         p.circle_filled(mouth, r * 0.7, Color32::from_rgb(22, 12, 10));
         let glow = (heat / 1.2).clamp(0.0, 1.0);
@@ -735,19 +776,29 @@ impl Game {
                 Color32::from_rgb(220, 80, 30)
             };
             p.add(Shape::convex_polygon(
-                vec![pos2(x - r * 0.07, base), pos2(x, base - h), pos2(x + r * 0.07, base)],
+                vec![
+                    pos2(x - r * 0.07, base),
+                    pos2(x, base - h),
+                    pos2(x + r * 0.07, base),
+                ],
                 color.gamma_multiply(0.9),
                 Stroke::NONE,
             ));
         }
         // The counter in front of the oven.
         p.rect_filled(
-            Rect::from_min_max(pos2(screen.left(), mouth.y + r * 0.5), pos2(screen.right(), screen.bottom())),
+            Rect::from_min_max(
+                pos2(screen.left(), mouth.y + r * 0.5),
+                pos2(screen.right(), screen.bottom()),
+            ),
             0.0,
             Color32::from_rgb(58, 40, 30),
         );
         p.line_segment(
-            [pos2(screen.left(), mouth.y + r * 0.5), pos2(screen.right(), mouth.y + r * 0.5)],
+            [
+                pos2(screen.left(), mouth.y + r * 0.5),
+                pos2(screen.right(), mouth.y + r * 0.5),
+            ],
             Stroke::new(4.0, Color32::from_rgb(120, 86, 60)),
         );
 
@@ -766,16 +817,25 @@ impl Game {
 
         // The thermometer.
         let tx = (c.x + r * 1.45).min(area.right() - 30.0);
-        let tube = Rect::from_min_max(pos2(tx - 14.0, area.top() + 20.0), pos2(tx + 14.0, area.bottom() - 20.0));
+        let tube = Rect::from_min_max(
+            pos2(tx - 14.0, area.top() + 20.0),
+            pos2(tx + 14.0, area.bottom() - 20.0),
+        );
         p.rect_filled(tube, 14.0, Color32::from_black_alpha(140));
         let y_of = |h: f32| tube.bottom() - ((h - 0.6) / 0.8).clamp(0.0, 1.0) * tube.height();
         let tol = target.map_or(TOL, |t| band(t) / t);
         p.rect_filled(
-            Rect::from_min_max(pos2(tube.left(), y_of(1.0 + tol)), pos2(tube.right(), y_of(1.0 - tol))),
+            Rect::from_min_max(
+                pos2(tube.left(), y_of(1.0 + tol)),
+                pos2(tube.right(), y_of(1.0 - tol)),
+            ),
             0.0,
             GOOD.gamma_multiply(0.55),
         );
-        let fill = Rect::from_min_max(pos2(tube.left() + 6.0, y_of(heat)), pos2(tube.right() - 6.0, tube.bottom() - 4.0));
+        let fill = Rect::from_min_max(
+            pos2(tube.left() + 6.0, y_of(heat)),
+            pos2(tube.right() - 6.0, tube.bottom() - 4.0),
+        );
         let hot = if (heat - 1.0).abs() <= tol {
             GOOD
         } else if heat > 1.0 {
@@ -852,7 +912,14 @@ impl Game {
         }
     }
 
-    fn draw_fishing(&self, p: &Painter, screen: Rect, area: Rect, elapsed: f32, target: Option<f32>) {
+    fn draw_fishing(
+        &self,
+        p: &Painter,
+        screen: Rect,
+        area: Rect,
+        elapsed: f32,
+        target: Option<f32>,
+    ) {
         let water = area.top() + area.height() * 0.18;
         vgradient(
             p,
@@ -862,7 +929,10 @@ impl Game {
         );
         // Far shore with trees.
         p.rect_filled(
-            Rect::from_min_max(pos2(screen.left(), water - 26.0), pos2(screen.right(), water)),
+            Rect::from_min_max(
+                pos2(screen.left(), water - 26.0),
+                pos2(screen.right(), water),
+            ),
             0.0,
             Color32::from_rgb(70, 120, 80),
         );
@@ -870,7 +940,11 @@ impl Game {
             let x = screen.left() + k as f32 * screen.width() / 29.0;
             let h = 30.0 + (k * 37 % 23) as f32;
             p.add(Shape::convex_polygon(
-                vec![pos2(x - 16.0, water - 20.0), pos2(x, water - 20.0 - h), pos2(x + 16.0, water - 20.0)],
+                vec![
+                    pos2(x - 16.0, water - 20.0),
+                    pos2(x, water - 20.0 - h),
+                    pos2(x + 16.0, water - 20.0),
+                ],
                 Color32::from_rgb(40, 90, 60),
                 Stroke::NONE,
             ));
@@ -889,7 +963,10 @@ impl Game {
                     pos2(x, y + (x * 0.02 + self.clock * 1.5 + k as f32).sin() * 3.0)
                 })
                 .collect();
-            p.add(Shape::line(pts, Stroke::new(1.5, Color32::from_white_alpha(18))));
+            p.add(Shape::line(
+                pts,
+                Stroke::new(1.5, Color32::from_white_alpha(18)),
+            ));
         }
 
         // The jetty and the angler.
@@ -907,16 +984,28 @@ impl Game {
             );
         }
         let me = pos2(jetty - 50.0, water - 14.0);
-        p.rect_filled(Rect::from_center_size(me - vec2(0.0, 26.0), vec2(22.0, 36.0)), 6.0, ACCENT);
+        p.rect_filled(
+            Rect::from_center_size(me - vec2(0.0, 26.0), vec2(22.0, 36.0)),
+            6.0,
+            ACCENT,
+        );
         p.circle_filled(me - vec2(0.0, 54.0), 11.0, Color32::from_rgb(240, 200, 170));
-        p.rect_filled(Rect::from_center_size(me - vec2(0.0, 63.0), vec2(26.0, 6.0)), 2.0, Color32::from_rgb(40, 60, 90));
+        p.rect_filled(
+            Rect::from_center_size(me - vec2(0.0, 63.0), vec2(26.0, 6.0)),
+            2.0,
+            Color32::from_rgb(40, 60, 90),
+        );
 
         let tension = self.heat.clamp(0.0, 1.6);
         let tol = target.map_or(TOL, |t| band(t) / t);
         let bend = ((tension - 0.6) * 60.0).clamp(0.0, 70.0);
         let tip = pos2(jetty + 110.0, water - 120.0 + bend);
         p.add(Shape::line(
-            vec![me - vec2(-6.0, 36.0), pos2(jetty + 50.0, water - 100.0 + bend * 0.4), tip],
+            vec![
+                me - vec2(-6.0, 36.0),
+                pos2(jetty + 50.0, water - 100.0 + bend * 0.4),
+                tip,
+            ],
             Stroke::new(4.0, Color32::from_rgb(60, 40, 30)),
         ));
 
@@ -942,8 +1031,16 @@ impl Game {
             Stroke::NONE,
         ));
         p.add(Shape::ellipse_filled(fish_at, vec2(size, size * 0.5), body));
-        p.circle_filled(fish_at + vec2(-size * 0.6, -size * 0.12), 3.5, Color32::WHITE);
-        p.circle_filled(fish_at + vec2(-size * 0.62, -size * 0.12), 1.8, Color32::BLACK);
+        p.circle_filled(
+            fish_at + vec2(-size * 0.6, -size * 0.12),
+            3.5,
+            Color32::WHITE,
+        );
+        p.circle_filled(
+            fish_at + vec2(-size * 0.62, -size * 0.12),
+            1.8,
+            Color32::BLACK,
+        );
 
         // The line: slack sags, too tight goes red and trembles.
         let mouth = fish_at - vec2(size, 0.0);
@@ -988,7 +1085,10 @@ impl Game {
         arc(1.0 - tol, 1.0 + tol, GOOD, 14.0);
         arc(1.0 + tol, 1.4, Color32::from_rgb(255, 70, 50), 10.0);
         let a = ang(tension);
-        p.line_segment([g, g + vec2(a.cos(), -a.sin()) * (rad - 6.0)], Stroke::new(4.0, TEXT));
+        p.line_segment(
+            [g, g + vec2(a.cos(), -a.sin()) * (rad - 6.0)],
+            Stroke::new(4.0, TEXT),
+        );
         p.circle_filled(g, 6.0, TEXT);
         let word = if (tension - 1.0).abs() <= tol {
             t("Strak!", "Tight!")
@@ -997,11 +1097,22 @@ impl Game {
         } else {
             t("Te slap", "Too slack")
         };
-        p.text(g + vec2(0.0, 26.0), egui::Align2::CENTER_CENTER, word, display(24.0), line_color);
+        p.text(
+            g + vec2(0.0, 26.0),
+            egui::Align2::CENTER_CENTER,
+            word,
+            display(24.0),
+            line_color,
+        );
         p.text(
             g + vec2(0.0, 52.0),
             egui::Align2::CENTER_CENTER,
-            tf!("{} · nog {:.0} m", "{} · {:.0} m to go", fish_name(kind), self.reel * 30.0),
+            tf!(
+                "{} · nog {:.0} m",
+                "{} · {:.0} m to go",
+                fish_name(kind),
+                self.reel * 30.0
+            ),
             egui::FontId::proportional(15.0),
             TEXT,
         );
@@ -1018,7 +1129,11 @@ impl Game {
             };
             p.add(Shape::ellipse_filled(at, vec2(16.0, 8.0), c));
             p.add(Shape::convex_polygon(
-                vec![at + vec2(14.0, 0.0), at + vec2(22.0, -7.0), at + vec2(22.0, 7.0)],
+                vec![
+                    at + vec2(14.0, 0.0),
+                    at + vec2(22.0, -7.0),
+                    at + vec2(22.0, 7.0),
+                ],
                 c,
                 Stroke::NONE,
             ));

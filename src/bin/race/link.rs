@@ -238,7 +238,9 @@ fn poll_trainer(
                         );
                     }
                     settings.virtual_shifting = true;
-                    if t.controller.gears.is_none() && session.as_ref().is_none_or(|s| s.game.is_some()) {
+                    if t.controller.gears.is_none()
+                        && session.as_ref().is_none_or(|s| s.game.is_some())
+                    {
                         t.controller.gears = Some(VirtualGears::default());
                     }
                 }
@@ -327,8 +329,8 @@ fn reset_controller(
     // In ERG the trainer sets the load; the shifter sets the intensity. A
     // workout game has no ERG, so it always rides on the gears.
     let game = session.as_ref().is_some_and(|s| s.game.is_some());
-    trainer.controller.gears = ((settings.virtual_shifting && session.is_none()) || game)
-        .then(VirtualGears::default);
+    trainer.controller.gears =
+        ((settings.virtual_shifting && session.is_none()) || game).then(VirtualGears::default);
     trainer.nudges = 0;
     trainer.last_control = Instant::now();
 }
@@ -428,7 +430,9 @@ fn control_trainer(
         t.send(req);
         // After a shift the grade follows straight away.
         if matches!(req, ControlRequest::SetGear { .. })
-            && let Some(next) = t.controller.tick(mode, target, input.power, speed, &bike, 0.0)
+            && let Some(next) = t
+                .controller
+                .tick(mode, target, input.power, speed, &bike, 0.0)
         {
             t.send(next);
             sent = Some(next);

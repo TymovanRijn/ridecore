@@ -57,7 +57,8 @@ async fn main() -> anyhow::Result<()> {
     };
     for uuid in [click::ASYNC, click::SYNC_TX] {
         if let Some(c) = find(uuid)
-            && c.properties.intersects(CharPropFlags::NOTIFY | CharPropFlags::INDICATE)
+            && c.properties
+                .intersects(CharPropFlags::NOTIFY | CharPropFlags::INDICATE)
         {
             trainer.subscribe(&c).await?;
         }
@@ -65,9 +66,13 @@ async fn main() -> anyhow::Result<()> {
     let mut notes = trainer.notifications().await?;
     let mut hello = b"RideOn".to_vec();
     hello.extend([0x02, 0x01]);
-    trainer.write(&rx, &hello, WriteType::WithoutResponse).await?;
+    trainer
+        .write(&rx, &hello, WriteType::WithoutResponse)
+        .await?;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    trainer.write(&rx, &[0x41, 0x08, 0x05], WriteType::WithoutResponse).await?;
+    trainer
+        .write(&rx, &[0x41, 0x08, 0x05], WriteType::WithoutResponse)
+        .await?;
     let end = tokio::time::Instant::now() + Duration::from_secs(20);
     while let Ok(Some(n)) = tokio::time::timeout_at(end, notes.next()).await {
         let hex: Vec<String> = n.value.iter().map(|b| format!("{b:02X}")).collect();

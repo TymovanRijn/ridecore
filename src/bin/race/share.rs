@@ -11,9 +11,9 @@ use bevy_egui::egui;
 use ridecore::card::{self, CardInput, RideStats};
 use ridecore::fit;
 use ridecore::i18n::{ordinal, t};
-use ridecore::tf;
 use ridecore::race::course::SegmentKind;
 use ridecore::strava;
+use ridecore::tf;
 
 use crate::RaceRes;
 
@@ -62,7 +62,10 @@ pub fn save_ride(res: &RaceRes) -> Result<SavedRide, String> {
             badges.push(format!("{what} {p}"));
         }
     }
-    badges.push(tf!("In het wiel {sheltered:.0}%", "Sheltered {sheltered:.0}%"));
+    badges.push(tf!(
+        "In het wiel {sheltered:.0}%",
+        "Sheltered {sheltered:.0}%"
+    ));
     let (xp, done, tried) = res.xp;
     if tried > 0 || xp > 0 {
         badges.push(tf!(
@@ -73,7 +76,10 @@ pub fn save_ride(res: &RaceRes) -> Result<SavedRide, String> {
 
     let dir = rides_dir();
     std::fs::create_dir_all(&dir).map_err(|e| {
-        tf!("Map aanmaken mislukt: {e}", "Could not create the folder: {e}")
+        tf!(
+            "Map aanmaken mislukt: {e}",
+            "Could not create the folder: {e}"
+        )
     })?;
     let stamp = samples
         .first()
@@ -137,7 +143,10 @@ pub fn save_training(
     let stats = RideStats::from_samples(samples);
     let dir = rides_dir();
     std::fs::create_dir_all(&dir).map_err(|e| {
-        tf!("Map aanmaken mislukt: {e}", "Could not create the folder: {e}")
+        tf!(
+            "Map aanmaken mislukt: {e}",
+            "Could not create the folder: {e}"
+        )
     })?;
     let stamp = samples
         .first()
@@ -269,7 +278,10 @@ impl StravaUi {
         let loaded = self.loaded.clone();
         std::thread::spawn(move || {
             let id = strava::client_id().unwrap_or_default();
-            let who = strava::tokens().map(|tok| tok.athlete.unwrap_or_else(|| t("je account", "your account").into()));
+            let who = strava::tokens().map(|tok| {
+                tok.athlete
+                    .unwrap_or_else(|| t("je account", "your account").into())
+            });
             if let Ok(mut l) = loaded.lock() {
                 *l = Some((id, who));
             }
@@ -316,7 +328,10 @@ pub fn settings_ui(ui: &mut egui::Ui, st: &mut StravaUi) {
     st.poll();
     if let Some(who) = st.connected.clone() {
         ui.horizontal(|ui| {
-            ui.label(tf!("Verbonden met Strava als {who}", "Connected to Strava as {who}"));
+            ui.label(tf!(
+                "Verbonden met Strava als {who}",
+                "Connected to Strava as {who}"
+            ));
             if ui.button(t("Ontkoppel", "Disconnect")).clicked() {
                 strava::disconnect();
                 st.connected = None;
@@ -350,7 +365,10 @@ pub fn settings_ui(ui: &mut egui::Ui, st: &mut StravaUi) {
                 ui.end_row();
             });
         if ui
-            .add_enabled(!st.busy(), egui::Button::new(t("Verbind met Strava", "Connect to Strava")))
+            .add_enabled(
+                !st.busy(),
+                egui::Button::new(t("Verbind met Strava", "Connect to Strava")),
+            )
             .clicked()
         {
             let saved = if st.client_secret.is_empty() {
@@ -392,6 +410,14 @@ pub fn settings_ui(ui: &mut egui::Ui, st: &mut StravaUi) {
 /// Opens a file with the default app (e.g. the card in Preview).
 pub fn open_file(path: &std::path::Path) {
     let _ = std::process::Command::new("open").arg(path).spawn();
+}
+
+/// Shows the file selected in Finder.
+pub fn reveal(path: &std::path::Path) {
+    let _ = std::process::Command::new("open")
+        .arg("-R")
+        .arg(path)
+        .spawn();
 }
 
 /// Puts the card image on the clipboard so it can be pasted anywhere.

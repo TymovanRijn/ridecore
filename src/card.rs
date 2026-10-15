@@ -249,10 +249,16 @@ pub fn render(input: &CardInput) -> Vec<u8> {
     // Stats grid: three columns.
     let s = &input.stats;
     let mut cells = vec![
-        (t("AFSTAND", "DISTANCE"), format!("{:.1} km", s.distance_m / 1000.0)),
+        (
+            t("AFSTAND", "DISTANCE"),
+            format!("{:.1} km", s.distance_m / 1000.0),
+        ),
         (t("TIJD", "TIME"), fmt_duration(s.duration_s)),
         (t("HOOGTEMETERS", "ELEVATION"), format!("{:.0} m", s.gain_m)),
-        (t("GEM. VERMOGEN", "AVG POWER"), format!("{:.0} W", s.avg_power)),
+        (
+            t("GEM. VERMOGEN", "AVG POWER"),
+            format!("{:.0} W", s.avg_power),
+        ),
         ("NP", format!("{:.0} W", s.norm_power)),
         (
             "W/KG",
@@ -266,7 +272,10 @@ pub fn render(input: &CardInput) -> Vec<u8> {
     ];
     cells.push(match s.avg_hr {
         Some(hr) => (t("GEM. HARTSLAG", "AVG HEART RATE"), format!("{hr:.0} bpm")),
-        None => (t("GEM. CADANS", "AVG CADENCE"), format!("{:.0} rpm", s.avg_cadence)),
+        None => (
+            t("GEM. CADANS", "AVG CADENCE"),
+            format!("{:.0} rpm", s.avg_cadence),
+        ),
     });
     y += 90.0;
     for (k, (label, value)) in cells.iter().enumerate() {

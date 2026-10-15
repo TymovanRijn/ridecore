@@ -54,7 +54,10 @@ pub fn save_app_credentials(client_id: &str, client_secret: &str) -> Result<()> 
         ));
     }
     if client_secret.trim().len() < 20 {
-        bail!(t("Client Secret lijkt niet compleet", "The Client Secret looks incomplete"));
+        bail!(t(
+            "Client Secret lijkt niet compleet",
+            "The Client Secret looks incomplete"
+        ));
     }
     store("client_id", client_id.trim())?;
     store("client_secret", client_secret.trim())
@@ -114,7 +117,10 @@ fn token_request(form: &[(&str, &str)]) -> Result<TokenResponse> {
     let status = res.status();
     let body = res.body_mut().read_to_string()?;
     if !status.is_success() {
-        bail!(tf!("Strava weigerde ({status}): {body}", "Strava refused ({status}): {body}"));
+        bail!(tf!(
+            "Strava weigerde ({status}): {body}",
+            "Strava refused ({status}): {body}"
+        ));
     }
     Ok(serde_json::from_str(&body)?)
 }
@@ -297,12 +303,16 @@ pub fn upload(fit: &[u8], name: &str, description: &str, external_id: &str) -> R
     let status = res.status();
     let text = res.body_mut().read_to_string()?;
     if !status.is_success() {
-        bail!(tf!("upload geweigerd ({status}): {text}", "upload refused ({status}): {text}"));
+        bail!(tf!(
+            "upload geweigerd ({status}): {text}",
+            "upload refused ({status}): {text}"
+        ));
     }
     let mut up: UploadStatus = serde_json::from_str(&text)?;
-    let id = up
-        .id
-        .context(t("Strava gaf geen upload-id", "Strava returned no upload id"))?;
+    let id = up.id.context(t(
+        "Strava gaf geen upload-id",
+        "Strava returned no upload id",
+    ))?;
     for _ in 0..30 {
         if let Some(activity) = up.activity_id {
             // Make it a Virtual Ride with its map, as Zwift rides appear.
@@ -366,7 +376,10 @@ pub fn recent_activities(count: u32) -> Result<Vec<serde_json::Value>> {
     let status = res.status();
     let body = res.body_mut().read_to_string()?;
     if !status.is_success() {
-        bail!(tf!("Strava weigerde ({status}): {body}", "Strava refused ({status}): {body}"));
+        bail!(tf!(
+            "Strava weigerde ({status}): {body}",
+            "Strava refused ({status}): {body}"
+        ));
     }
     Ok(serde_json::from_str(&body)?)
 }
@@ -378,9 +391,9 @@ fn open_in_browser(url: &str) -> Result<()> {
     let cmd = "explorer";
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let cmd = "xdg-open";
-    std::process::Command::new(cmd)
-        .arg(url)
-        .spawn()
-        .context(t("kon de browser niet openen", "could not open the browser"))?;
+    std::process::Command::new(cmd).arg(url).spawn().context(t(
+        "kon de browser niet openen",
+        "could not open the browser",
+    ))?;
     Ok(())
 }

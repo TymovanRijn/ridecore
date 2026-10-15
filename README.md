@@ -11,6 +11,7 @@ A free, open-source indoor cycling app written in Rust with [Bevy](https://bevye
 
 - **Races against AI teams** on 20 real climbs and routes: Alpe d'Huez, Mont Ventoux, Stelvio, the finale of Liège–Bastogne–Liège and more. The routes are built from OpenStreetMap roads and real elevation data. The race has a full peloton with drafting, attacks and team orders, and you pick your role: sprinter, climber, rouleur or domestique.
 - **Workouts in ERG mode.** A library of proven sessions (Rønnestad 30/15, Seiler 4×8, Norwegian 4×4, sweet spot, threshold, a ramp test that sets your FTP), with a live timeline, coaching and a summary at the end.
+- **Build your own workouts.** Stack blocks (steady, ramp, intervals, free ride) in watts or % FTP, with a live profile, duration, TSS, IF and NP as you go. Ready-made parts (warm-up, 4 × 4, 30/15s, sweet spot…), one-click zones, undo, and any library workout can be copied and tweaked. Export to Zwift's `.zwo` format, or drop a `.zwo` file on the window to import it.
 - **Workout games.** Instead of staring at a watt number you can ride any workout as a game. Your power against the target is the controller:
   - **Balloon ride**: your power is your altitude. Stay in the corridor and collect the coins.
   - **Pizza baker**: your power is the fire. Every round is a pizza: don't serve it raw, don't burn it.

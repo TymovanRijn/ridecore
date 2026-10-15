@@ -5,8 +5,8 @@
 use super::course::SegmentKind;
 use super::field::RiderKind;
 use super::{Race, Rider, TeamOrder};
-use crate::race::course::Course;
 use crate::i18n::t;
+use crate::race::course::Course;
 use crate::rng::Rng;
 use crate::tf;
 
@@ -426,7 +426,8 @@ fn direct_team(race: &mut Race, t: usize, sit: &Situation) {
         let text = tf!(
             "{} ({}) probeert mee te springen",
             "{} ({}) tries to bridge across",
-            race.riders[i].profile.name, team.spec.name
+            race.riders[i].profile.name,
+            team.spec.name
         );
         race.log(text);
     }

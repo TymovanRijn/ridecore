@@ -137,7 +137,13 @@ impl Session {
     /// Rides the workout as `kind`: no ERG, you hold the watts yourself.
     pub fn with_game(mut self, kind: Option<GameKind>) -> Self {
         self.game = kind.map(|k| {
-            let secs: Vec<u32> = self.plan.workout.segments.iter().map(|s| s.secs()).collect();
+            let secs: Vec<u32> = self
+                .plan
+                .workout
+                .segments
+                .iter()
+                .map(|s| s.secs())
+                .collect();
             let hardest = self
                 .plan
                 .workout
@@ -240,7 +246,7 @@ impl Session {
     }
 }
 
-fn zone_color(z: Zone) -> egui::Color32 {
+pub fn zone_color(z: Zone) -> egui::Color32 {
     let [r, g, b] = z.rgb();
     egui::Color32::from_rgb(r, g, b)
 }
@@ -250,7 +256,7 @@ fn focus_color(f: Focus) -> egui::Color32 {
     egui::Color32::from_rgb(r, g, b)
 }
 
-fn mmss(s: f32) -> String {
+pub fn mmss(s: f32) -> String {
     let s = s.max(0.0).ceil() as u32;
     if s >= 3600 {
         format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
@@ -327,7 +333,10 @@ fn keys(
         s.bias = (s.bias + nudges as f32 * BIAS_STEP).clamp(0.7, 1.3);
         let text = tf!("Intensiteit {:.0}%", "Intensity {:.0}%", s.bias * 100.0);
         let sub = if s.bias > 1.0 {
-            t("Zwaarder dan gepland — stoer!", "Harder than planned — brave!")
+            t(
+                "Zwaarder dan gepland — stoer!",
+                "Harder than planned — brave!",
+            )
         } else if s.bias < 1.0 {
             t(
                 "Lichter dan gepland: prima op een zware dag",
@@ -375,7 +384,10 @@ fn tick(
         res.race.riders[me].dist = 30.0;
         s.say(
             t("Nog een keer!", "Once more!"),
-            t("Terug naar de start van de route", "Back to the start of the route"),
+            t(
+                "Terug naar de start van de route",
+                "Back to the start of the route",
+            ),
             ACCENT_SOFT,
         );
     }
@@ -439,7 +451,10 @@ fn tick(
             let sub = if Zone::of(w / s.ftp).is_work() {
                 t("Houd vol zolang het lukt", "Hold on as long as you can")
             } else {
-                t("Nog makkelijk: rustig doortrappen", "Still easy: keep spinning")
+                t(
+                    "Nog makkelijk: rustig doortrappen",
+                    "Still easy: keep spinning",
+                )
             };
             s.say(
                 tf!("Stap {} · {w:.0} W", "Step {} · {w:.0} W", seg - 1),
@@ -474,7 +489,10 @@ fn tick(
             if last {
                 s.say(
                     t("Uitrijden", "Cool-down"),
-                    t("Goed gedaan! Rustig uitfietsen", "Well done! Spin it out easy"),
+                    t(
+                        "Goed gedaan! Rustig uitfietsen",
+                        "Well done! Spin it out easy",
+                    ),
                     zone_color(Zone::Endurance),
                 );
             } else {
@@ -490,7 +508,7 @@ fn tick(
             }
         } else if prev.is_none() {
             s.say(
-                s.plan.name,
+                s.plan.name.clone(),
                 if s.game.is_some() {
                     t(
                         "Schakel naar je doelwattage · de trainer rijdt een vlakke weg",
@@ -589,7 +607,11 @@ fn finish(
         );
     } else {
         play(commands, &bank.fanfare, 0.8);
-        s.say(t("Training voltooid!", "Workout complete!"), s.plan.name, GOOD);
+        s.say(
+            t("Training voltooid!", "Workout complete!"),
+            s.plan.name.clone(),
+            GOOD,
+        );
     }
     let mut badges = vec![format!("TSS {tss:.0}"), format!("{kj:.0} kJ")];
     if n > 0 {
@@ -601,7 +623,7 @@ fn finish(
     if res.samples.len() > 10 {
         res.saved = Some(crate::share::save_training(
             res,
-            s.plan.name,
+            &s.plan.name,
             badges,
             s.plan.focus.rgb(),
         ));
@@ -704,7 +726,7 @@ fn timeline(p: &egui::Painter, rect: egui::Rect, s: &Session, ftp: f32, show_now
 }
 
 /// A small zone pill.
-fn pill(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
+pub fn pill(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
     egui::Frame::new()
         .fill(color.gamma_multiply(0.22))
         .stroke(egui::Stroke::new(1.0, color))
@@ -720,7 +742,7 @@ fn pill(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
         });
 }
 
-fn glass() -> egui::Frame {
+pub fn glass() -> egui::Frame {
     egui::Frame::new()
         .fill(egui::Color32::from_rgba_premultiplied(12, 14, 22, 232))
         .stroke(egui::Stroke::new(1.0, theme::CARD_EDGE))
@@ -764,7 +786,9 @@ fn hud(
     if let Some(g) = &s.game {
         let painter = ctx.layer_painter(egui::LayerId::background());
         let sess = &*s;
-        g.draw(&painter, screen, s.elapsed, target, &|t| sess.target_at_time(t));
+        g.draw(&painter, screen, s.elapsed, target, &|t| {
+            sess.target_at_time(t)
+        });
         egui::Area::new("t-game".into())
             .anchor(egui::Align2::RIGHT_TOP, [-16.0, 16.0])
             .interactable(false)
@@ -809,7 +833,13 @@ fn hud(
                         ui.add_space(10.0);
                     }
                     let me = res.race.player();
-                    number(ui, format!("{:.1}", me.speed * 3.6), t("km/u", "km/h"), 28.0, TEXT);
+                    number(
+                        ui,
+                        format!("{:.1}", me.speed * 3.6),
+                        t("km/u", "km/h"),
+                        28.0,
+                        TEXT,
+                    );
                     ui.add_space(10.0);
                     number(
                         ui,
@@ -826,7 +856,11 @@ fn hud(
                     pill(ui, &tf!("Versnelling {}", "Gear {}", g.index + 1), ACCENT);
                 } else if (s.bias - 1.0).abs() > 0.001 {
                     ui.add_space(4.0);
-                    pill(ui, &tf!("Intensiteit {:.0}%", "Intensity {:.0}%", s.bias * 100.0), ACCENT);
+                    pill(
+                        ui,
+                        &tf!("Intensiteit {:.0}%", "Intensity {:.0}%", s.bias * 100.0),
+                        ACCENT,
+                    );
                 }
                 if trainer.controller.erg_paused {
                     ui.label(
@@ -834,7 +868,7 @@ fn hud(
                             "ERG gepauzeerd · trap door om verder te gaan",
                             "ERG paused · keep pedalling to carry on",
                         ))
-                            .color(WARN),
+                        .color(WARN),
                     );
                 }
             });
@@ -922,7 +956,11 @@ fn hud(
                             let w = s.target_of(k + 1);
                             ui.add_space(2.0);
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new(t("Hierna", "Next")).small().color(MUTED));
+                                ui.label(
+                                    egui::RichText::new(t("Hierna", "Next"))
+                                        .small()
+                                        .color(MUTED),
+                                );
                                 let (dot, _) = ui.allocate_exact_size(
                                     egui::vec2(10.0, 10.0),
                                     egui::Sense::hover(),
@@ -1018,7 +1056,7 @@ fn hud(
                 ui.set_width(width - 36.0);
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new(s.plan.name)
+                        egui::RichText::new(&s.plan.name)
                             .font(display(20.0))
                             .color(TEXT),
                     );
@@ -1043,7 +1081,7 @@ fn hud(
                                     "{nailed}/{n} gehaald  ·  ",
                                     "{nailed}/{n} nailed  ·  "
                                 ))
-                                    .color(MUTED),
+                                .color(MUTED),
                             );
                         }
                     });
@@ -1098,7 +1136,9 @@ fn hud(
                 glass().show(ui, |ui| {
                     ui.set_width(360.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(egui::RichText::new(t("GEPAUZEERD", "PAUSED")).font(display(40.0)));
+                        ui.label(
+                            egui::RichText::new(t("GEPAUZEERD", "PAUSED")).font(display(40.0)),
+                        );
                         ui.label(
                             egui::RichText::new(tf!(
                                 "{} · {} van {}",
@@ -1209,7 +1249,7 @@ fn summary(
                                 .color(if complete { GOOD } else { ACCENT_SOFT }),
                         );
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(s.plan.name).font(display(24.0)));
+                            ui.label(egui::RichText::new(&s.plan.name).font(display(24.0)));
                             pill(ui, s.plan.focus.label(), focus_color(s.plan.focus));
                         });
                         if let Some(g) = &s.game {
@@ -1240,7 +1280,7 @@ fn summary(
                                     "{week:.0} TSS deze week",
                                     "{week:.0} TSS this week"
                                 ))
-                                    .color(MUTED),
+                                .color(MUTED),
                             );
                         }
                     });
@@ -1312,9 +1352,21 @@ fn summary(
                     let gap = 26.0;
                     number(ui, mmss(secs), t("tijd", "time"), 38.0, TEXT);
                     ui.add_space(gap);
-                    number(ui, format!("{avg:.0} W"), t("gemiddeld", "average"), 38.0, TEXT);
+                    number(
+                        ui,
+                        format!("{avg:.0} W"),
+                        t("gemiddeld", "average"),
+                        38.0,
+                        TEXT,
+                    );
                     ui.add_space(gap);
-                    number(ui, format!("{np:.0} W"), t("genormaliseerd", "normalized"), 38.0, TEXT);
+                    number(
+                        ui,
+                        format!("{np:.0} W"),
+                        t("genormaliseerd", "normalized"),
+                        38.0,
+                        TEXT,
+                    );
                     ui.add_space(gap);
                     number(ui, format!("{tss:.0}"), "tss", 38.0, ACCENT);
                     ui.add_space(gap);
@@ -1341,7 +1393,7 @@ fn summary(
                             "{nailed} van de {n} intervallen gehaald",
                             "{nailed} of {n} intervals nailed"
                         ))
-                            .font(display(20.0)),
+                        .font(display(20.0)),
                     );
                     let per_row = ((ui.available_width() / 22.0) as usize).max(1);
                     for row in s.work.chunks(per_row) {
@@ -1457,7 +1509,7 @@ pub fn plan_tile(ui: &mut egui::Ui, plan: &Plan, selected: bool) -> bool {
     p.text(
         rect.left_top() + egui::vec2(14.0, 8.0),
         egui::Align2::LEFT_TOP,
-        plan.name,
+        &plan.name,
         display(21.0),
         TEXT,
     );
@@ -1468,7 +1520,17 @@ pub fn plan_tile(ui: &mut egui::Ui, plan: &Plan, selected: bool) -> bool {
         display(21.0),
         if selected { ACCENT } else { ACCENT_SOFT },
     );
-    let line = format!("{} · TSS {:.0}", plan.focus.label(), plan.tss());
+    let own = plan.id.starts_with(ridecore::custom::ID_PREFIX);
+    let line = if own {
+        tf!(
+            "★ Eigen · {} · TSS {:.0}",
+            "★ Mine · {} · TSS {:.0}",
+            plan.focus.label(),
+            plan.tss()
+        )
+    } else {
+        format!("{} · TSS {:.0}", plan.focus.label(), plan.tss())
+    };
     p.text(
         rect.left_top() + egui::vec2(14.0, 33.0),
         egui::Align2::LEFT_TOP,
@@ -1518,7 +1580,7 @@ pub fn mini_blocks(p: &egui::Painter, rect: egui::Rect, plan: &Plan) {
 
 /// The selected workout in full, for the start screen.
 pub fn plan_detail(ui: &mut egui::Ui, plan: &Plan, ftp: f32) {
-    ui.label(egui::RichText::new(plan.name).font(display(32.0)));
+    ui.label(egui::RichText::new(&plan.name).font(display(32.0)));
     ui.horizontal(|ui| {
         pill(ui, plan.focus.label(), focus_color(plan.focus));
         ui.label(
@@ -1561,18 +1623,25 @@ pub fn plan_detail(ui: &mut egui::Ui, plan: &Plan, ftp: f32) {
         );
     }
     ui.add_space(6.0);
-    ui.label(egui::RichText::new(plan.summary).color(ACCENT_SOFT));
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new(t("WAAROM WERKT DIT?", "WHY DOES THIS WORK?"))
+    ui.label(egui::RichText::new(&plan.summary).color(ACCENT_SOFT));
+    if !plan.why.trim().is_empty() {
+        ui.add_space(4.0);
+        let own = plan.id.starts_with(ridecore::custom::ID_PREFIX);
+        ui.label(
+            egui::RichText::new(if own {
+                t("NOTITIES", "NOTES")
+            } else {
+                t("WAAROM WERKT DIT?", "WHY DOES THIS WORK?")
+            })
             .font(display(15.0))
             .color(MUTED)
             .extra_letter_spacing(1.2),
-    );
-    ui.label(egui::RichText::new(plan.why).color(TEXT));
+        );
+        ui.label(egui::RichText::new(&plan.why).color(TEXT));
+    }
     if !plan.source.is_empty() {
         ui.label(
-            egui::RichText::new(plan.source)
+            egui::RichText::new(&plan.source)
                 .small()
                 .italics()
                 .color(MUTED),

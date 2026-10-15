@@ -6,9 +6,9 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use ridecore::i18n::t;
 use ridecore::race::ai::Intent;
-use ridecore::tf;
 use ridecore::race::course::SegmentKind;
 use ridecore::race::{Race, TeamOrder};
+use ridecore::tf;
 
 use crate::camera::CameraRig;
 use crate::link::{InputSettings, PlayerInput, Trainer};
@@ -136,12 +136,7 @@ fn hud(
                         },
                         30.0 * pulse,
                     );
-                    big(
-                        ui,
-                        "W/KG",
-                        format!("{:.1}", watts / me.profile.kg),
-                        ORANGE,
-                    );
+                    big(ui, "W/KG", format!("{:.1}", watts / me.profile.kg), ORANGE);
                     big(
                         ui,
                         "RPM",
@@ -246,7 +241,7 @@ fn hud(
                                 "Testmodus: pijl omhoog/omlaag",
                                 "Test mode: arrow up/down",
                             ))
-                                .color(egui::Color32::YELLOW),
+                            .color(egui::Color32::YELLOW),
                         );
                     }
                 });
@@ -261,10 +256,14 @@ fn hud(
                 ui.vertical_centered(|ui| {
                     if !race.started() {
                         ui.label(
-                            egui::RichText::new(tf!("Start over {:.0}", "Start in {:.0}", -race.time))
-                                .size(40.0)
-                                .strong()
-                                .color(ORANGE),
+                            egui::RichText::new(tf!(
+                                "Start over {:.0}",
+                                "Start in {:.0}",
+                                -race.time
+                            ))
+                            .size(40.0)
+                            .strong()
+                            .color(ORANGE),
                         );
                         ui.label(t(
                             "Klaar maken… begin te trappen bij 0!",
@@ -498,7 +497,14 @@ fn hud(
                             menu.open = false;
                             res.paused = false;
                         }
-                        if menu.open && ui.button(t("Opgeven en terug naar het menu", "Quit and back to the menu")).clicked() {
+                        if menu.open
+                            && ui
+                                .button(t(
+                                    "Opgeven en terug naar het menu",
+                                    "Quit and back to the menu",
+                                ))
+                                .clicked()
+                        {
                             menu.open = false;
                             next.set(Screen::Setup);
                         }

@@ -12,11 +12,11 @@ pub mod field;
 pub mod moments;
 pub mod pack;
 
-use crate::physics::{BikeParams, RiderState};
 use crate::i18n::t;
+use crate::physics::{BikeParams, RiderState};
 use crate::rng::Rng;
-use crate::tf;
 use crate::route::Route;
+use crate::tf;
 
 use ai::{Intent, Plan};
 use course::{Course, SEGMENT_POINTS};

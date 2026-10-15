@@ -5,8 +5,8 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use ridecore::i18n::{ordinal, t};
 use ridecore::race::Race;
-use ridecore::tf;
 use ridecore::race::course::SegmentKind;
+use ridecore::tf;
 
 use crate::share::{self, StravaUi};
 use crate::{RaceRes, Screen};
@@ -92,9 +92,9 @@ fn results_ui(
                     "{xp} XP · {done} van {tried} uitdagingen gehaald",
                     "{xp} XP · {done} of {tried} challenges completed"
                 ))
-                    .size(20.0)
-                    .strong()
-                    .color(egui::Color32::from_rgb(255, 200, 40)),
+                .size(20.0)
+                .strong()
+                .color(egui::Color32::from_rgb(255, 200, 40)),
             );
             share_panel(ui, &res, &mut strava);
             ui.add_space(8.0);
@@ -119,13 +119,16 @@ fn results_ui(
                                     "{still} renners nog onderweg…",
                                     "{still} riders still on the road…"
                                 ))
-                                    .weak(),
+                                .weak(),
                             );
                         }
                     });
 
                 for (title, kind) in [
-                    (t("Puntenklassement (sprints)", "Points (sprints)"), SegmentKind::Sprint),
+                    (
+                        t("Puntenklassement (sprints)", "Points (sprints)"),
+                        SegmentKind::Sprint,
+                    ),
                     (t("Bergklassement", "Mountains"), SegmentKind::Kom),
                 ] {
                     let pts = race.points(kind);
@@ -197,17 +200,25 @@ pub fn share_panel(ui: &mut egui::Ui, res: &RaceRes, strava: &mut StravaUi) {
                 if ui
                     .add_enabled(
                         can_upload,
-                        egui::Button::new(egui::RichText::new(t("Upload naar Strava", "Upload to Strava")).size(17.0)),
+                        egui::Button::new(
+                            egui::RichText::new(t("Upload naar Strava", "Upload to Strava"))
+                                .size(17.0),
+                        ),
                     )
                     .clicked()
                 {
                     strava.upload(ride);
                 }
                 if let Some(card) = &ride.card {
-                    if ui.button(t("Open stats-kaart", "Open stats card")).clicked() {
+                    if ui
+                        .button(t("Open stats-kaart", "Open stats card"))
+                        .clicked()
+                    {
                         share::open_file(card);
                     }
-                    if ui.button(t("Kopieer kaart", "Copy card")).clicked() && share::copy_image(card) {
+                    if ui.button(t("Kopieer kaart", "Copy card")).clicked()
+                        && share::copy_image(card)
+                    {
                         strava.note(t(
                             "Kaart gekopieerd: plak hem als foto bij je Strava-rit.",
                             "Card copied: paste it as a photo on your Strava ride.",

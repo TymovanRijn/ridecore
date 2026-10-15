@@ -7,9 +7,9 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use ridecore::i18n::{ordinal, t};
 use ridecore::race::challenges::{ChallengeTracker, Event};
-use ridecore::tf;
 use ridecore::race::course::SegmentKind;
 use ridecore::race::moments::{Moment, MomentTracker};
+use ridecore::tf;
 
 use crate::sound::{self, SoundBank};
 use crate::{RaceRes, Screen};
@@ -144,7 +144,11 @@ fn detect_moments(
             ),
             Moment::JerseyLost(kind) => (
                 tf!("{} kwijt", "{} lost", jersey_name(kind)),
-                t("Pak hem terug bij de volgende kans", "Take it back at the next chance").into(),
+                t(
+                    "Pak hem terug bij de volgende kans",
+                    "Take it back at the next chance",
+                )
+                .into(),
                 egui::Color32::LIGHT_GRAY,
                 None,
             ),
@@ -350,8 +354,12 @@ fn draw_feedback(
                         );
                         if ch.streak > 0 {
                             ui.label(
-                                egui::RichText::new(tf!("reeks x{:.1}", "streak x{:.1}", ch.multiplier()))
-                                    .color(GOOD),
+                                egui::RichText::new(tf!(
+                                    "reeks x{:.1}",
+                                    "streak x{:.1}",
+                                    ch.multiplier()
+                                ))
+                                .color(GOOD),
                             );
                         }
                     });
@@ -389,7 +397,8 @@ fn draw_feedback(
                             egui::RichText::new(tf!(
                                 "Uitdagingen {}/{}",
                                 "Challenges {}/{}",
-                                ch.completed, ch.attempted
+                                ch.completed,
+                                ch.attempted
                             ))
                             .weak(),
                         );
