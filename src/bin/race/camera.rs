@@ -6,6 +6,7 @@ use bevy::camera::RenderTarget;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 
+use ridecore::i18n::t;
 use ridecore::race::Race;
 use ridecore::race::ai::Intent;
 
@@ -34,11 +35,11 @@ impl View {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Chase => "Achtervolg",
-            Self::Close => "Dichtbij",
+            Self::Chase => t("Achtervolg", "Chase"),
+            Self::Close => t("Dichtbij", "Close"),
             Self::Tv => "TV",
-            Self::Helicopter => "Helikopter",
-            Self::LookBack => "Achterom",
+            Self::Helicopter => t("Helikopter", "Helicopter"),
+            Self::LookBack => t("Achterom", "Look back"),
         }
     }
 

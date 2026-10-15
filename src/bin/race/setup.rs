@@ -4,7 +4,9 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
+use ridecore::i18n::{self, Lang, t};
 use ridecore::profile::Profile;
+use ridecore::tf;
 use ridecore::race::course::find_climbs;
 use ridecore::race::field::{RiderKind, TeamSpec, rival_teams};
 use ridecore::race::{PlayerSetup, Race, RaceConfig};
@@ -89,7 +91,11 @@ impl RouteInfo {
 
 impl Default for SetupForm {
     fn default() -> Self {
-        let profile = Profile::load();
+        let mut profile = Profile::load();
+        // The default name, in the language you ride in.
+        if profile.name == "Jij" && i18n::english() {
+            profile.name = "You".into();
+        }
         let mut form = Self {
             mode: PlayMode::Race,
             name: profile.name.clone(),
@@ -148,6 +154,24 @@ impl SetupForm {
         if let Err(e) = p.save() {
             eprintln!("profile not saved: {e}");
         }
+    }
+
+    /// Switches the language and rebuilds everything that holds text.
+    fn set_lang(&mut self, lang: Lang) {
+        if i18n::lang() == lang {
+            return;
+        }
+        i18n::set_lang(lang);
+        self.profile.lang = lang.code().into();
+        let id = self.routes[self.route].id.clone();
+        self.routes = Route::catalog();
+        self.route = self.routes.iter().position(|r| r.id == id).unwrap_or(0);
+        self.infos = self.routes.iter().map(RouteInfo::of).collect();
+        if self.name == "Jij" || self.name == "You" {
+            self.name = t("Jij", "You").into();
+        }
+        self.regenerate();
+        self.save_profile();
     }
 
     pub fn log_session(&mut self, session: ridecore::profile::Session) {
@@ -309,7 +333,9 @@ fn setup_ui(
     );
     let ui = &mut root;
     strava.poll();
-    header(ui, &trainer, &strava);
+    if let Some(lang) = header(ui, &trainer, &strava) {
+        form.set_lang(lang);
+    }
     ui.add_space(10.0);
     mode_tabs(ui, &mut form);
     ui.add_space(12.0);
@@ -488,7 +514,9 @@ fn fill_down(p: &egui::Painter, pts: &[egui::Pos2], bottom: f32, color: egui::Co
     p.add(m);
 }
 
-fn header(ui: &mut egui::Ui, trainer: &Trainer, strava: &crate::share::StravaUi) {
+/// Title, device chips and the language switch; returns a picked language.
+fn header(ui: &mut egui::Ui, trainer: &Trainer, strava: &crate::share::StravaUi) -> Option<Lang> {
+    let mut picked = None;
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
@@ -501,35 +529,49 @@ fn header(ui: &mut egui::Ui, trainer: &Trainer, strava: &crate::share::StravaUi)
                 );
             });
             ui.label(
-                egui::RichText::new(
+                egui::RichText::new(t(
                     "Wegwedstrijden tegen AI-ploegen · trainingen die je sneller maken · op je eigen trainer",
-                )
+                    "Road races against AI teams · workouts that make you faster · on your own trainer",
+                ))
                 .color(MUTED),
             );
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Language switch: the other language, in its own words.
+            for lang in Lang::ALL.into_iter().rev() {
+                let on = i18n::lang() == lang;
+                if ui
+                    .selectable_label(on, egui::RichText::new(lang.code().to_uppercase()).strong())
+                    .on_hover_text(lang.name())
+                    .clicked()
+                {
+                    picked = Some(lang);
+                }
+            }
+            ui.add_space(8.0);
             let strava_text = match &strava.connected {
                 Some(who) => format!("Strava · {who}"),
-                None => "Strava niet gekoppeld".into(),
+                None => t("Strava niet gekoppeld", "Strava not connected").into(),
             };
             chip(ui, &strava_text, strava.connected.is_some());
             let click = match (&trainer.shifter, trainer.shifter_battery) {
                 (Some(_), Some(b)) => format!("Zwift Click · {b}%"),
                 (Some(_), None) => "Zwift Click".into(),
-                (None, _) => "Click: druk op een knop".into(),
+                (None, _) => t("Click: druk op een knop", "Click: press a button").into(),
             };
             chip(ui, &click, trainer.shifter.is_some());
             let kickr = match &trainer.name {
                 Some(n) => n.clone(),
-                None => "Trainer zoeken…".into(),
+                None => t("Trainer zoeken…", "Looking for trainer…").into(),
             };
             chip(ui, &kickr, trainer.name.is_some());
         });
     });
+    picked
 }
 
 fn rider_card(ui: &mut egui::Ui, form: &mut SetupForm) {
-    card(ui, "Renner", |ui| {
+    card(ui, t("Renner", "Rider"), |ui| {
         let mut regen = false;
         ui.horizontal(|ui| {
             let [r, g, b] = form
@@ -574,7 +616,7 @@ fn rider_card(ui: &mut egui::Ui, form: &mut SetupForm) {
         ui.horizontal(|ui| {
             for (label, value, range, suffix, speed) in [
                 ("FTP", &mut form.ftp, 80.0..=600.0, " W", 1.0),
-                ("Gewicht", &mut form.kg, 35.0..=160.0, " kg", 0.1),
+                (t("Gewicht", "Weight"), &mut form.kg, 35.0..=160.0, " kg", 0.1),
             ] {
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(label).small().color(MUTED));
@@ -589,7 +631,7 @@ fn rider_card(ui: &mut egui::Ui, form: &mut SetupForm) {
                 });
             }
             ui.vertical(|ui| {
-                ui.label(egui::RichText::new("Lengte").small().color(MUTED));
+                ui.label(egui::RichText::new(t("Lengte", "Height")).small().color(MUTED));
                 ui.add(
                     egui::DragValue::new(&mut form.height_cm)
                         .range(140.0..=215.0)
@@ -598,7 +640,7 @@ fn rider_card(ui: &mut egui::Ui, form: &mut SetupForm) {
             });
         });
         ui.add_space(6.0);
-        ui.label(egui::RichText::new("Rol in de ploeg").small().color(MUTED));
+        ui.label(egui::RichText::new(t("Rol in de ploeg", "Role in the team")).small().color(MUTED));
         ui.horizontal(|ui| {
             for k in KINDS {
                 if ui.selectable_label(form.kind == k, k.label()).clicked() {
@@ -618,14 +660,17 @@ fn devices_card(
     trainer: &Trainer,
     strava: &mut crate::share::StravaUi,
 ) {
-    card(ui, "Trainer & apparaten", |ui| {
+    card(ui, t("Trainer & apparaten", "Trainer & devices"), |ui| {
         ui.label(egui::RichText::new(&trainer.status).color(MUTED));
         ui.checkbox(
             &mut settings.virtual_shifting,
-            "Virtueel schakelen (Zwift Click of +/−)",
+            t(
+                "Virtueel schakelen (Zwift Click of +/−)",
+                "Virtual shifting (Zwift Click or +/−)",
+            ),
         );
         ui.horizontal(|ui| {
-            ui.label("Moeilijkheid");
+            ui.label(t("Moeilijkheid", "Difficulty"));
             let gears = settings.virtual_shifting;
             ui.add_enabled(
                 !gears,
@@ -635,20 +680,24 @@ fn devices_card(
         });
         if settings.virtual_shifting {
             ui.label(
-                egui::RichText::new(
+                egui::RichText::new(t(
                     "Met virtueel schakelen voel je 100% van de helling, net als in Zwift.",
-                )
+                    "With virtual shifting you feel 100% of the gradient, just like in Zwift.",
+                ))
                 .small()
                 .color(MUTED),
             );
         }
         ui.checkbox(
             &mut settings.keyboard,
-            "Testmodus: rijden met het toetsenbord",
+            t(
+                "Testmodus: rijden met het toetsenbord",
+                "Test mode: ride with the keyboard",
+            ),
         );
         if strava.connected.is_none() {
             ui.add_space(6.0);
-            egui::CollapsingHeader::new("Strava koppelen")
+            egui::CollapsingHeader::new(t("Strava koppelen", "Connect Strava"))
                 .default_open(false)
                 .show(ui, |ui| crate::share::settings_ui(ui, strava));
         }
@@ -656,10 +705,10 @@ fn devices_card(
 }
 
 fn course_card(ui: &mut egui::Ui, form: &mut SetupForm) {
-    card(ui, "Parcours", |ui| {
+    card(ui, t("Parcours", "Course"), |ui| {
         ui.add(
             egui::TextEdit::singleline(&mut form.route_filter)
-                .hint_text("Zoek: Alpe, Italië, Dolomieten…")
+                .hint_text(t("Zoek: Alpe, Italië, Dolomieten…", "Search: Alpe, Italy, Dolomites…"))
                 .desired_width(f32::INFINITY),
         );
         ui.add_space(6.0);
@@ -702,7 +751,7 @@ fn course_card(ui: &mut egui::Ui, form: &mut SetupForm) {
         ui.horizontal(|ui| {
             stat(ui, format!("{:.1}", route.length_m() / 1000.0), "km", TEXT);
             ui.add_space(8.0);
-            stat(ui, format!("{:.0}", route.gain_m()), "hoogtemeters", TEXT);
+            stat(ui, format!("{:.0}", route.gain_m()), t("hoogtemeters", "elevation m"), TEXT);
             ui.add_space(8.0);
             stat(
                 ui,
@@ -711,12 +760,12 @@ fn course_card(ui: &mut egui::Ui, form: &mut SetupForm) {
                 theme::grade_color(route.max_grade_pct()),
             );
             ui.add_space(8.0);
-            stat(ui, info.climbs.to_string(), "klimmen", TEXT);
+            stat(ui, info.climbs.to_string(), t("klimmen", "climbs"), TEXT);
         });
         let (looped, lap_km) = (route.looped, route.length_m() / 1000.0);
         if looped {
             ui.horizontal(|ui| {
-                ui.label("Ronden");
+                ui.label(t("Ronden", "Laps"));
                 ui.add(egui::DragValue::new(&mut form.laps).range(1..=20));
                 ui.label(
                     egui::RichText::new(format!("= {:.1} km", lap_km * form.laps as f64))
@@ -724,7 +773,13 @@ fn course_card(ui: &mut egui::Ui, form: &mut SetupForm) {
                 );
             });
         } else {
-            ui.label(egui::RichText::new("Van start naar finish op de echte weg").color(MUTED));
+            ui.label(
+                egui::RichText::new(t(
+                    "Van start naar finish op de echte weg",
+                    "From start to finish on the real road",
+                ))
+                .color(MUTED),
+            );
         }
     });
 }
@@ -863,17 +918,17 @@ fn big_profile(ui: &mut egui::Ui, route: &Route) {
 }
 
 fn field_card(ui: &mut egui::Ui, form: &mut SetupForm) {
-    card(ui, "Deelnemersveld", |ui| {
+    card(ui, t("Deelnemersveld", "The field"), |ui| {
         let mut regen = false;
         let strength = match form.difficulty {
-            d if d < 0.85 => "Rustig",
-            d if d < 0.97 => "Gelijkwaardig",
-            d if d < 1.08 => "Pittig",
-            d if d < 1.2 => "Zwaar",
+            d if d < 0.85 => t("Rustig", "Easy"),
+            d if d < 0.97 => t("Gelijkwaardig", "Even"),
+            d if d < 1.08 => t("Pittig", "Tough"),
+            d if d < 1.2 => t("Zwaar", "Hard"),
             _ => "WorldTour",
         };
         ui.horizontal(|ui| {
-            ui.label("Sterkte");
+            ui.label(t("Sterkte", "Strength"));
             regen |= ui
                 .add(egui::Slider::new(&mut form.difficulty, 0.6..=1.4).show_value(false))
                 .changed();
@@ -883,16 +938,16 @@ fn field_card(ui: &mut egui::Ui, form: &mut SetupForm) {
             );
         });
         ui.horizontal(|ui| {
-            ui.label("Ploegen");
+            ui.label(t("Ploegen", "Teams"));
             regen |= ui
                 .add(egui::DragValue::new(&mut form.team_count).range(3..=11))
                 .changed();
             ui.add_space(10.0);
-            ui.label("Renners per ploeg");
+            ui.label(t("Renners per ploeg", "Riders per team"));
             ui.add(egui::DragValue::new(&mut form.riders_per_team).range(4..=8));
         });
         ui.add_space(6.0);
-        ui.label(egui::RichText::new("Kies je ploeg").small().color(MUTED));
+        ui.label(egui::RichText::new(t("Kies je ploeg", "Pick your team")).small().color(MUTED));
         let max_wkg = form.teams.iter().map(|t| t.mean_wkg).fold(0.1, f32::max);
         let mut pick = None;
         for (i, team) in form.teams.iter().enumerate() {
@@ -949,10 +1004,10 @@ fn field_card(ui: &mut egui::Ui, form: &mut SetupForm) {
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            if ui.button("Opnieuw verdelen").clicked() {
+            if ui.button(t("Opnieuw verdelen", "Reshuffle")).clicked() {
                 regen = true;
             }
-            ui.toggle_value(&mut form.show_team_editor, "Ploegen aanpassen");
+            ui.toggle_value(&mut form.show_team_editor, t("Ploegen aanpassen", "Edit teams"));
         });
         if form.show_team_editor {
             egui::Grid::new("teams-edit")
@@ -996,14 +1051,14 @@ fn start_card(ui: &mut egui::Ui, form: &SetupForm, can_start: bool, t: f32) -> b
             stat(
                 ui,
                 format!("{:.0}", route.gain_m() * laps as f32),
-                "hoogtemeters",
+                i18n::t("hoogtemeters", "elevation m"),
                 TEXT,
             );
             ui.add_space(8.0);
-            stat(ui, riders.to_string(), "renners", TEXT);
+            stat(ui, riders.to_string(), i18n::t("renners", "riders"), TEXT);
         });
         ui.add_space(8.0);
-        start_button_inner(ui, "START WEDSTRIJD", can_start, t)
+        start_button_inner(ui, i18n::t("START WEDSTRIJD", "START RACE"), can_start, t)
     })
 }
 
@@ -1047,7 +1102,13 @@ fn start_button_inner(ui: &mut egui::Ui, text: &str, can_start: bool, t: f32) ->
         egui::Color32::WHITE,
     );
     if !can_start {
-        ui.label(egui::RichText::new("Wacht op je KICKR, of zet de testmodus aan.").color(MUTED));
+        ui.label(
+            egui::RichText::new(i18n::t(
+                "Wacht op je trainer, of zet de testmodus aan.",
+                "Waiting for your trainer, or switch on test mode.",
+            ))
+            .color(MUTED),
+        );
     }
     resp.clicked()
 }
@@ -1057,8 +1118,16 @@ fn mode_tabs(ui: &mut egui::Ui, form: &mut SetupForm) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         for (mode, title, sub) in [
-            (PlayMode::Race, "WEDSTRIJD", "Koers tegen AI-ploegen"),
-            (PlayMode::Training, "TRAINING", "Intervallen in ERG of als spel"),
+            (
+                PlayMode::Race,
+                t("WEDSTRIJD", "RACE"),
+                t("Koers tegen AI-ploegen", "Race against AI teams"),
+            ),
+            (
+                PlayMode::Training,
+                t("TRAINING", "WORKOUT"),
+                t("Intervallen in ERG of als spel", "Intervals in ERG or as a game"),
+            ),
         ] {
             let selected = form.mode == mode;
             let (rect, resp) =
@@ -1105,15 +1174,15 @@ fn mode_tabs(ui: &mut egui::Ui, form: &mut SetupForm) {
 
 /// The workout library, filterable by what you want to improve.
 fn library_card(ui: &mut egui::Ui, form: &mut SetupForm) {
-    card(ui, "Trainingen", |ui| {
+    card(ui, t("Trainingen", "Workouts"), |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
             for (focus, label) in [
-                (None, "Alles"),
+                (None, t("Alles", "All")),
                 (Some(Focus::Vo2max), "VO2max"),
                 (Some(Focus::Threshold), "FTP"),
                 (Some(Focus::SweetSpot), "Sweet spot"),
-                (Some(Focus::Endurance), "Basis"),
+                (Some(Focus::Endurance), t("Basis", "Base")),
                 (Some(Focus::Test), "Test"),
             ] {
                 if ui
@@ -1156,32 +1225,34 @@ fn week_card(ui: &mut egui::Ui, form: &SetupForm) {
     let now = ridecore::fit::now_unix();
     let streak = form.profile.streak_days(now);
     let week = form.profile.week_tss(now);
-    card(ui, "Jouw week", |ui| {
+    card(ui, t("Jouw week", "Your week"), |ui| {
         ui.horizontal(|ui| {
-            stat(ui, streak.to_string(), "dagen op rij", ACCENT);
+            stat(ui, streak.to_string(), t("dagen op rij", "day streak"), ACCENT);
             ui.add_space(14.0);
-            stat(ui, format!("{week:.0}"), "tss deze week", TEXT);
+            stat(ui, format!("{week:.0}"), t("tss deze week", "tss this week"), TEXT);
             ui.add_space(14.0);
             stat(
                 ui,
                 form.profile.sessions.len().to_string(),
-                "trainingen",
+                t("trainingen", "workouts"),
                 TEXT,
             );
         });
         match form.profile.sessions.last() {
             Some(last) => ui.label(
-                egui::RichText::new(format!(
+                egui::RichText::new(tf!(
                     "Laatst: {} · {}",
+                    "Last: {} · {}",
                     last.workout,
-                    ridecore::card::date_nl(last.unix_time)
+                    ridecore::card::date(last.unix_time)
                 ))
                 .color(MUTED),
             ),
             None => ui.label(
-                egui::RichText::new(
+                egui::RichText::new(t(
                     "Nog geen trainingen: begin met de Kennismaking of een ramptest.",
-                )
+                    "No workouts yet: start with the First ride or a ramp test.",
+                ))
                 .color(MUTED),
             ),
         };
@@ -1191,7 +1262,7 @@ fn week_card(ui: &mut egui::Ui, form: &SetupForm) {
 /// The selected workout in full.
 fn training_card(ui: &mut egui::Ui, form: &mut SetupForm) {
     let plan = form.plans[form.workout.min(form.plans.len() - 1)].clone();
-    card(ui, "Training", |ui| {
+    card(ui, t("Training", "Workout"), |ui| {
         crate::training::plan_detail(ui, &plan, form.ftp);
     });
 }
@@ -1217,18 +1288,20 @@ fn training_start(ui: &mut egui::Ui, form: &mut SetupForm, can_start: bool, t: f
         if let Some(kind) = form.game {
             ui.label(egui::RichText::new(kind.blurb()).color(TEXT));
             ui.label(
-                egui::RichText::new(
+                egui::RichText::new(i18n::t(
                     "Geen ERG: de trainer rijdt een vlakke weg en jij haalt het doel met \
                      je versnellingen. Click of +/− = schakelen.",
-                )
+                    "No ERG: the trainer rides a flat road and you hit the target with \
+                     your gears. Click or +/− = shift.",
+                ))
                 .small()
                 .color(MUTED),
             );
             ui.add_space(4.0);
-            return start_button_inner(ui, "START SPEL", can_start, t);
+            return start_button_inner(ui, i18n::t("START SPEL", "START GAME"), can_start, t);
         }
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Omgeving").color(MUTED));
+            ui.label(egui::RichText::new(i18n::t("Omgeving", "Scenery")).color(MUTED));
             let current = form.routes[form.route].name.clone();
             egui::ComboBox::from_id_salt("training-route")
                 .selected_text(current)
@@ -1246,13 +1319,14 @@ fn training_start(ui: &mut egui::Ui, form: &mut SetupForm, can_start: bool, t: f
                 });
         });
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(i18n::t(
                 "De trainer houdt het vermogen vast (ERG). Click of +/− = intensiteit.",
-            )
+                "The trainer holds the power (ERG). Click or +/− = intensity.",
+            ))
             .small()
             .color(MUTED),
         );
         ui.add_space(4.0);
-        start_button_inner(ui, "START TRAINING", can_start, t)
+        start_button_inner(ui, i18n::t("START TRAINING", "START WORKOUT"), can_start, t)
     })
 }

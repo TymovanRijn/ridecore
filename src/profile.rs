@@ -14,6 +14,8 @@ pub struct Profile {
     pub height_cm: f32,
     /// Index into the setup screen's rider roles.
     pub role: u8,
+    /// "nl" or "en"; empty follows the system language.
+    pub lang: String,
     pub sessions: Vec<Session>,
 }
 
@@ -25,6 +27,7 @@ impl Default for Profile {
             kg: 75.0,
             height_cm: 180.0,
             role: 2,
+            lang: String::new(),
             sessions: Vec::new(),
         }
     }

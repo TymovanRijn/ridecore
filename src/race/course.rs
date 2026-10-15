@@ -1,7 +1,9 @@
 //! A race course: a route ridden for some laps, its sprint and KOM segments,
 //! and the road's 3D centerline for rendering.
 
+use crate::i18n::t;
 use crate::route::Route;
+use crate::tf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentKind {
@@ -76,7 +78,7 @@ fn climb_name(route: &Route, top: f64) -> Option<String> {
         .map(|p| (p, (p.pos[0] - x).hypot(p.pos[1] - z)))
         .filter(|(_, d)| *d < 1500.0)
         .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(p, _)| format!("Klim bij {}", p.name))
+        .map(|(p, _)| tf!("Klim bij {}", "Climb at {}", p.name))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -105,7 +107,7 @@ impl ClimbCategory {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Uncategorized => "Klim",
+            Self::Uncategorized => t("Klim", "Climb"),
             Self::Cat4 => "Cat 4",
             Self::Cat3 => "Cat 3",
             Self::Cat2 => "Cat 2",
@@ -140,7 +142,7 @@ impl Course {
             if let Some((s, e)) = kom {
                 segments.push(Segment {
                     kind: SegmentKind::Kom,
-                    name: format!("KOM ronde {}", l + 1),
+                    name: tf!("KOM ronde {}", "KOM lap {}", l + 1),
                     start_m: base + s,
                     end_m: base + e,
                 });
@@ -148,7 +150,7 @@ impl Course {
             if l + 1 < laps {
                 segments.push(Segment {
                     kind: SegmentKind::Sprint,
-                    name: format!("Tussensprint ronde {}", l + 1),
+                    name: tf!("Tussensprint ronde {}", "Sprint lap {}", l + 1),
                     start_m: base + lap - SPRINT_ZONE_M,
                     end_m: base + lap,
                 });

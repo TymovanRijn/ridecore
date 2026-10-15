@@ -5,6 +5,7 @@ pub mod ble;
 pub mod card;
 pub mod click;
 pub mod fit;
+pub mod i18n;
 pub mod ftms;
 pub mod map;
 pub mod physics;

@@ -4,6 +4,8 @@ use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
 use image::{ImageBuffer, Rgba, RgbaImage};
 
 use crate::fit::Sample;
+use crate::i18n::{english, ordinal, t};
+use crate::tf;
 
 /// Summary numbers of one ride, from its 1 Hz samples.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -68,16 +70,7 @@ impl RideStats {
 
 /// A date like "13 oktober 2026" from Unix seconds (UTC).
 pub fn date_nl(unix: u64) -> String {
-    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
-    let z = (unix / 86_400) as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + if month <= 2 { 1 } else { 0 };
+    let (day, month, year) = civil(unix);
     const MONTHS: [&str; 12] = [
         "januari",
         "februari",
@@ -93,6 +86,44 @@ pub fn date_nl(unix: u64) -> String {
         "december",
     ];
     format!("{day} {} {year}", MONTHS[(month - 1) as usize])
+}
+
+/// The date in the current language: "13 oktober 2026" or "13 October 2026".
+pub fn date(unix: u64) -> String {
+    if !english() {
+        return date_nl(unix);
+    }
+    let (day, month, year) = civil(unix);
+    const MONTHS: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    format!("{day} {} {year}", MONTHS[(month - 1) as usize])
+}
+
+/// Day, month (1-12) and year from Unix seconds (UTC).
+fn civil(unix: u64) -> (i64, i64, i64) {
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = (unix / 86_400) as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + if month <= 2 { 1 } else { 0 };
+    (day, month, year)
 }
 
 pub fn fmt_duration(s: u32) -> String {
@@ -143,7 +174,7 @@ pub fn render(input: &CardInput) -> Vec<u8> {
     text(
         &mut img,
         &font,
-        "RIDECORE · WEDSTRIJD",
+        t("RIDECORE · WEDSTRIJD", "RIDECORE · RACE"),
         64.0,
         70.0,
         30.0,
@@ -178,7 +209,7 @@ pub fn render(input: &CardInput) -> Vec<u8> {
             text(
                 &mut img,
                 &font,
-                "OVERWINNING!",
+                t("OVERWINNING!", "VICTORY!"),
                 64.0,
                 y,
                 120.0,
@@ -187,13 +218,13 @@ pub fn render(input: &CardInput) -> Vec<u8> {
             );
         }
         Some((p, n)) => {
-            let big = format!("{p}e");
+            let big = ordinal(p);
             text(&mut img, &font, &big, 64.0, y, 170.0, orange, true);
             let w = width(&font, &big, 170.0);
             text(
                 &mut img,
                 &font,
-                &format!("van {n}"),
+                &tf!("van {n}", "of {n}"),
                 64.0 + w + 24.0,
                 y,
                 48.0,
@@ -218,21 +249,24 @@ pub fn render(input: &CardInput) -> Vec<u8> {
     // Stats grid: three columns.
     let s = &input.stats;
     let mut cells = vec![
-        ("AFSTAND", format!("{:.1} km", s.distance_m / 1000.0)),
-        ("TIJD", fmt_duration(s.duration_s)),
-        ("HOOGTEMETERS", format!("{:.0} m", s.gain_m)),
-        ("GEM. VERMOGEN", format!("{:.0} W", s.avg_power)),
+        (t("AFSTAND", "DISTANCE"), format!("{:.1} km", s.distance_m / 1000.0)),
+        (t("TIJD", "TIME"), fmt_duration(s.duration_s)),
+        (t("HOOGTEMETERS", "ELEVATION"), format!("{:.0} m", s.gain_m)),
+        (t("GEM. VERMOGEN", "AVG POWER"), format!("{:.0} W", s.avg_power)),
         ("NP", format!("{:.0} W", s.norm_power)),
         (
             "W/KG",
             format!("{:.2}", s.avg_power / input.rider_kg.max(1.0)),
         ),
-        ("MAX VERMOGEN", format!("{} W", s.max_power)),
-        ("GEM. SNELHEID", format!("{:.1} km/u", s.avg_speed_kmh)),
+        (t("MAX VERMOGEN", "MAX POWER"), format!("{} W", s.max_power)),
+        (
+            t("GEM. SNELHEID", "AVG SPEED"),
+            tf!("{:.1} km/u", "{:.1} km/h", s.avg_speed_kmh),
+        ),
     ];
     cells.push(match s.avg_hr {
-        Some(hr) => ("GEM. HARTSLAG", format!("{hr:.0} bpm")),
-        None => ("GEM. CADANS", format!("{:.0} rpm", s.avg_cadence)),
+        Some(hr) => (t("GEM. HARTSLAG", "AVG HEART RATE"), format!("{hr:.0} bpm")),
+        None => (t("GEM. CADANS", "AVG CADENCE"), format!("{:.0} rpm", s.avg_cadence)),
     });
     y += 90.0;
     for (k, (label, value)) in cells.iter().enumerate() {
@@ -306,7 +340,10 @@ pub fn render(input: &CardInput) -> Vec<u8> {
     text(
         &mut img,
         &font,
-        "Gereden op RideCore · echte route, echte hoogtemeters",
+        t(
+            "Gereden op RideCore · echte route, echte hoogtemeters",
+            "Ridden on RideCore · real route, real climbing",
+        ),
         64.0,
         (H - 40) as f32,
         24.0,

@@ -7,6 +7,8 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use ridecore::fit;
+use ridecore::i18n::t;
+use ridecore::tf;
 use ridecore::training::{
     BlockScore, Focus, Plan, Zone, best_average, ftp_from_ramp, normalized_power, peak,
     zone_seconds,
@@ -323,13 +325,16 @@ fn keys(
     if nudges != 0 && session.finished.is_none() {
         let s = &mut *session;
         s.bias = (s.bias + nudges as f32 * BIAS_STEP).clamp(0.7, 1.3);
-        let text = format!("Intensiteit {:.0}%", s.bias * 100.0);
+        let text = tf!("Intensiteit {:.0}%", "Intensity {:.0}%", s.bias * 100.0);
         let sub = if s.bias > 1.0 {
-            "Zwaarder dan gepland — stoer!"
+            t("Zwaarder dan gepland — stoer!", "Harder than planned — brave!")
         } else if s.bias < 1.0 {
-            "Lichter dan gepland: prima op een zware dag"
+            t(
+                "Lichter dan gepland: prima op een zware dag",
+                "Lighter than planned: fine on a tough day",
+            )
         } else {
-            "Precies zoals gepland"
+            t("Precies zoals gepland", "Exactly as planned")
         };
         s.say(text, sub, ACCENT);
     }
@@ -369,8 +374,8 @@ fn tick(
         let me = res.race.human;
         res.race.riders[me].dist = 30.0;
         s.say(
-            "Nog een keer!",
-            "Terug naar de start van de route",
+            t("Nog een keer!", "Once more!"),
+            t("Terug naar de start van de route", "Back to the start of the route"),
             ACCENT_SOFT,
         );
     }
@@ -418,25 +423,26 @@ fn tick(
                 let left = n - k;
                 let rest = match left {
                     0 => String::new(),
-                    1 => " · nog 1 te gaan".into(),
-                    _ => format!(" · nog {left} te gaan"),
+                    1 => t(" · nog 1 te gaan", " · 1 to go").into(),
+                    _ => tf!(" · nog {left} te gaan", " · {left} to go"),
                 };
+                let sub = tf!("{pct:.0}% van het doel{rest}", "{pct:.0}% of target{rest}");
                 if score.nailed() {
-                    s.say("Gehaald!", format!("{pct:.0}% van het doel{rest}"), GOOD);
+                    s.say(t("Gehaald!", "Nailed it!"), sub, GOOD);
                 } else {
-                    s.say("Doorbijten!", format!("{pct:.0}% van het doel{rest}"), WARN);
+                    s.say(t("Doorbijten!", "Dig in!"), sub, WARN);
                 }
             }
         }
         if s.plan.ramp_test && seg >= 2 {
             let w = s.target_of(seg);
             let sub = if Zone::of(w / s.ftp).is_work() {
-                "Houd vol zolang het lukt"
+                t("Houd vol zolang het lukt", "Hold on as long as you can")
             } else {
-                "Nog makkelijk: rustig doortrappen"
+                t("Nog makkelijk: rustig doortrappen", "Still easy: keep spinning")
             };
             s.say(
-                format!("Stap {} · {w:.0} W", seg - 1),
+                tf!("Stap {} · {w:.0} W", "Step {} · {w:.0} W", seg - 1),
                 sub,
                 zone_color(zone),
             );
@@ -445,13 +451,18 @@ fn tick(
             let w = s.target_of(seg);
             if !short || new_set || k == n || k == n / 2 + 1 {
                 let title = if k == n {
-                    "Laatste interval!".to_string()
+                    t("Laatste interval!", "Last interval!").to_string()
                 } else if n >= 4 && k == n / 2 + 1 {
-                    format!("Halverwege · {k} / {n}")
+                    tf!("Halverwege · {k} / {n}", "Halfway · {k} / {n}")
                 } else {
                     format!("Interval {k} / {n}")
                 };
-                let mut sub = format!("{} · {} op {w:.0} W", zone.label(), duration_text(secs));
+                let mut sub = tf!(
+                    "{} · {} op {w:.0} W",
+                    "{} · {} at {w:.0} W",
+                    zone.label(),
+                    duration_text(secs)
+                );
                 if let Some(c) = cadence_of(&segments[seg]) {
                     sub.push_str(&format!(" · {c} rpm"));
                 }
@@ -462,14 +473,18 @@ fn tick(
             let last = seg + 1 == segments.len();
             if last {
                 s.say(
-                    "Uitrijden",
-                    "Goed gedaan! Rustig uitfietsen",
+                    t("Uitrijden", "Cool-down"),
+                    t("Goed gedaan! Rustig uitfietsen", "Well done! Spin it out easy"),
                     zone_color(Zone::Endurance),
                 );
             } else {
                 s.say(
-                    "Herstel",
-                    format!("{} rustig doortrappen · drink wat", duration_text(secs)),
+                    t("Herstel", "Recovery"),
+                    tf!(
+                        "{} rustig doortrappen · drink wat",
+                        "{} easy spinning · have a drink",
+                        duration_text(secs)
+                    ),
                     zone_color(Zone::Recovery),
                 );
             }
@@ -477,9 +492,15 @@ fn tick(
             s.say(
                 s.plan.name,
                 if s.game.is_some() {
-                    "Schakel naar je doelwattage · de trainer rijdt een vlakke weg"
+                    t(
+                        "Schakel naar je doelwattage · de trainer rijdt een vlakke weg",
+                        "Shift to your target watts · the trainer rides a flat road",
+                    )
                 } else {
-                    "Rustig opbouwen · de trainer regelt de weerstand"
+                    t(
+                        "Rustig opbouwen · de trainer regelt de weerstand",
+                        "Build up easy · the trainer sets the resistance",
+                    )
                 },
                 focus_color(s.plan.focus),
             );
@@ -562,20 +583,20 @@ fn finish(
     });
     if s.ended_early {
         s.say(
-            "Training gestopt",
-            format!("{} gereden", mmss(secs)),
+            t("Training gestopt", "Workout stopped"),
+            tf!("{} gereden", "{} ridden", mmss(secs)),
             ACCENT_SOFT,
         );
     } else {
         play(commands, &bank.fanfare, 0.8);
-        s.say("Training voltooid!", s.plan.name, GOOD);
+        s.say(t("Training voltooid!", "Workout complete!"), s.plan.name, GOOD);
     }
     let mut badges = vec![format!("TSS {tss:.0}"), format!("{kj:.0} kJ")];
     if n > 0 {
-        badges.insert(0, format!("Intervallen {nailed}/{n}"));
+        badges.insert(0, tf!("Intervallen {nailed}/{n}", "Intervals {nailed}/{n}"));
     }
     if let Some(f) = s.new_ftp {
-        badges.insert(0, format!("Nieuwe FTP {f:.0} W"));
+        badges.insert(0, tf!("Nieuwe FTP {f:.0} W", "New FTP {f:.0} W"));
     }
     if res.samples.len() > 10 {
         res.saved = Some(crate::share::save_training(
@@ -772,7 +793,7 @@ fn hud(
                     ui.add_space(10.0);
                     let cad_hint = seg
                         .and_then(|(k, _)| cadence_of(&s.plan.workout.segments[k]))
-                        .map(|c| format!("rpm · doel {c}"))
+                        .map(|c| tf!("rpm · doel {c}", "rpm · target {c}"))
                         .unwrap_or_else(|| "rpm".into());
                     number(ui, format!("{:.0}", input.cadence), &cad_hint, 46.0, TEXT);
                 });
@@ -781,14 +802,14 @@ fn hud(
                         number(
                             ui,
                             hr.to_string(),
-                            "hartslag",
+                            t("hartslag", "heart rate"),
                             28.0,
                             egui::Color32::from_rgb(255, 95, 95),
                         );
                         ui.add_space(10.0);
                     }
                     let me = res.race.player();
-                    number(ui, format!("{:.1}", me.speed * 3.6), "km/u", 28.0, TEXT);
+                    number(ui, format!("{:.1}", me.speed * 3.6), t("km/u", "km/h"), 28.0, TEXT);
                     ui.add_space(10.0);
                     number(
                         ui,
@@ -802,14 +823,17 @@ fn hud(
                     && let Some(g) = &trainer.controller.gears
                 {
                     ui.add_space(4.0);
-                    pill(ui, &format!("Versnelling {}", g.index + 1), ACCENT);
+                    pill(ui, &tf!("Versnelling {}", "Gear {}", g.index + 1), ACCENT);
                 } else if (s.bias - 1.0).abs() > 0.001 {
                     ui.add_space(4.0);
-                    pill(ui, &format!("Intensiteit {:.0}%", s.bias * 100.0), ACCENT);
+                    pill(ui, &tf!("Intensiteit {:.0}%", "Intensity {:.0}%", s.bias * 100.0), ACCENT);
                 }
                 if trainer.controller.erg_paused {
                     ui.label(
-                        egui::RichText::new("ERG gepauzeerd · trap door om verder te gaan")
+                        egui::RichText::new(t(
+                            "ERG gepauzeerd · trap door om verder te gaan",
+                            "ERG paused · keep pedalling to carry on",
+                        ))
                             .color(WARN),
                     );
                 }
@@ -837,12 +861,16 @@ fn hud(
                                 |ui| {
                                     let text = match s.interval(k) {
                                         _ if s.plan.ramp_test && k >= 2 => {
-                                            format!("Stap {}", k - 1)
+                                            tf!("Stap {}", "Step {}", k - 1)
                                         }
                                         Some((i, n)) => format!("Interval {i} / {n}"),
-                                        None if k < s.plan.warmup.max(1) => "Warming-up".into(),
-                                        None if k + 1 == segs.len() => "Uitrijden".into(),
-                                        None => "Herstel".into(),
+                                        None if k < s.plan.warmup.max(1) => {
+                                            t("Warming-up", "Warm-up").into()
+                                        }
+                                        None if k + 1 == segs.len() => {
+                                            t("Uitrijden", "Cool-down").into()
+                                        }
+                                        None => t("Herstel", "Recovery").into(),
                                     };
                                     ui.label(
                                         egui::RichText::new(text).font(display(22.0)).color(TEXT),
@@ -852,7 +880,13 @@ fn hud(
                         });
                         ui.columns(3, |cols| {
                             cols[0].vertical_centered(|ui| {
-                                number(ui, format!("{target:.0}"), "doel watt", 46.0, zc);
+                                number(
+                                    ui,
+                                    format!("{target:.0}"),
+                                    t("doel watt", "target watts"),
+                                    46.0,
+                                    zc,
+                                );
                             });
                             cols[1].vertical_centered(|ui| {
                                 ui.label(
@@ -867,7 +901,7 @@ fn hud(
                                 } else {
                                     WARN
                                 };
-                                number(ui, format!("{power:.0}"), "jij", 46.0, c);
+                                number(ui, format!("{power:.0}"), t("jij", "you"), 46.0, c);
                             });
                         });
                         // Block progress.
@@ -888,7 +922,7 @@ fn hud(
                             let w = s.target_of(k + 1);
                             ui.add_space(2.0);
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("Hierna").small().color(MUTED));
+                                ui.label(egui::RichText::new(t("Hierna", "Next")).small().color(MUTED));
                                 let (dot, _) = ui.allocate_exact_size(
                                     egui::vec2(10.0, 10.0),
                                     egui::Sense::hover(),
@@ -908,8 +942,9 @@ fn hud(
                         if s.plan.ramp_test && s.watts.len() > 60 {
                             let best = best_average(&s.watts, 60);
                             ui.label(
-                                egui::RichText::new(format!(
+                                egui::RichText::new(tf!(
                                     "Beste minuut {best:.0} W  ·  geschatte FTP {:.0} W",
+                                    "Best minute {best:.0} W  ·  estimated FTP {:.0} W",
                                     ftp_from_ramp(best)
                                 ))
                                 .color(MUTED),
@@ -991,8 +1026,9 @@ fn hud(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let total = s.total_s();
                         ui.label(
-                            egui::RichText::new(format!(
+                            egui::RichText::new(tf!(
                                 "{} / {} · nog {}",
+                                "{} / {} · {} left",
                                 mmss(s.elapsed),
                                 mmss(total),
                                 mmss(total - s.elapsed)
@@ -1003,7 +1039,10 @@ fn hud(
                         if !s.work.is_empty() && !s.plan.ramp_test {
                             let (nailed, n) = s.nailed();
                             ui.label(
-                                egui::RichText::new(format!("{nailed}/{n} gehaald  ·  "))
+                                egui::RichText::new(tf!(
+                                    "{nailed}/{n} gehaald  ·  ",
+                                    "{nailed}/{n} nailed  ·  "
+                                ))
                                     .color(MUTED),
                             );
                         }
@@ -1021,9 +1060,15 @@ fn hud(
                     true,
                 );
                 let keys = if s.game.is_some() {
-                    "Click of +/− = schakelen  ·  P pauze  ·  Esc menu"
+                    t(
+                        "Click of +/− = schakelen  ·  P pauze  ·  Esc menu",
+                        "Click or +/− = shift  ·  P pause  ·  Esc menu",
+                    )
                 } else {
-                    "Click of +/− = intensiteit  ·  P pauze  ·  Esc menu  ·  C camera"
+                    t(
+                        "Click of +/− = intensiteit  ·  P pauze  ·  Esc menu  ·  C camera",
+                        "Click or +/− = intensity  ·  P pause  ·  Esc menu  ·  C camera",
+                    )
                 };
                 ui.label(egui::RichText::new(keys).small().color(MUTED));
             });
@@ -1035,7 +1080,7 @@ fn hud(
             .interactable(false)
             .show(ctx, |ui| {
                 ui.label(
-                    egui::RichText::new("PAUZE")
+                    egui::RichText::new(t("PAUZE", "PAUSED"))
                         .font(display(90.0))
                         .color(egui::Color32::WHITE),
                 );
@@ -1053,10 +1098,11 @@ fn hud(
                 glass().show(ui, |ui| {
                     ui.set_width(360.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(egui::RichText::new("GEPAUZEERD").font(display(40.0)));
+                        ui.label(egui::RichText::new(t("GEPAUZEERD", "PAUSED")).font(display(40.0)));
                         ui.label(
-                            egui::RichText::new(format!(
+                            egui::RichText::new(tf!(
                                 "{} · {} van {}",
+                                "{} · {} of {}",
                                 s.plan.name,
                                 mmss(s.elapsed),
                                 mmss(s.total_s())
@@ -1064,14 +1110,14 @@ fn hud(
                             .color(MUTED),
                         );
                         ui.add_space(10.0);
-                        if big_button(ui, "Doorgaan", ACCENT, 320.0) {
+                        if big_button(ui, t("Doorgaan", "Continue"), ACCENT, 320.0) {
                             s.menu = false;
                             res.paused = false;
                         }
                         let stop = if s.plan.ramp_test {
-                            "Test afronden"
+                            t("Test afronden", "Finish test")
                         } else {
-                            "Training afronden"
+                            t("Training afronden", "Finish workout")
                         };
                         if big_button(ui, stop, egui::Color32::from_rgb(52, 60, 82), 320.0) {
                             s.menu = false;
@@ -1080,7 +1126,7 @@ fn hud(
                         }
                         if big_button(
                             ui,
-                            "Terug naar start",
+                            t("Terug naar start", "Back to start"),
                             egui::Color32::from_rgb(40, 44, 58),
                             320.0,
                         ) {
@@ -1153,9 +1199,9 @@ fn summary(
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         let title = match (s.plan.ramp_test, complete) {
-                            (true, _) => "TEST AFGEROND",
-                            (false, true) => "TRAINING VOLTOOID",
-                            (false, false) => "TRAINING GESTOPT",
+                            (true, _) => t("TEST AFGEROND", "TEST DONE"),
+                            (false, true) => t("TRAINING VOLTOOID", "WORKOUT COMPLETE"),
+                            (false, false) => t("TRAINING GESTOPT", "WORKOUT STOPPED"),
                         };
                         ui.label(
                             egui::RichText::new(title)
@@ -1181,15 +1227,19 @@ fn summary(
                         ui.add_space(6.0);
                         {
                             ui.label(
-                                egui::RichText::new(format!(
-                                    "{streak} dag{} op rij",
-                                    if streak == 1 { "" } else { "en" }
-                                ))
+                                egui::RichText::new(if streak == 1 {
+                                    tf!("{streak} dag op rij", "{streak} day streak")
+                                } else {
+                                    tf!("{streak} dagen op rij", "{streak} day streak")
+                                })
                                 .font(display(26.0))
                                 .color(ACCENT),
                             );
                             ui.label(
-                                egui::RichText::new(format!("{week:.0} TSS deze week"))
+                                egui::RichText::new(tf!(
+                                    "{week:.0} TSS deze week",
+                                    "{week:.0} TSS this week"
+                                ))
                                     .color(MUTED),
                             );
                         }
@@ -1205,14 +1255,26 @@ fn summary(
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.horizontal(|ui| {
-                                number(ui, format!("{new:.0} W"), "jouw nieuwe ftp", 56.0, TEXT);
+                                number(
+                                    ui,
+                                    format!("{new:.0} W"),
+                                    t("jouw nieuwe ftp", "your new ftp"),
+                                    56.0,
+                                    TEXT,
+                                );
                                 ui.add_space(20.0);
                                 let (sign, c) = if delta >= 0.0 {
                                     ("+", GOOD)
                                 } else {
                                     ("", WARN)
                                 };
-                                number(ui, format!("{sign}{delta:.0} W"), "verschil", 40.0, c);
+                                number(
+                                    ui,
+                                    format!("{sign}{delta:.0} W"),
+                                    t("verschil", "change"),
+                                    40.0,
+                                    c,
+                                );
                                 ui.add_space(20.0);
                                 number(
                                     ui,
@@ -1226,13 +1288,13 @@ fn summary(
                                     |ui| {
                                         if s.ftp_saved {
                                             ui.label(
-                                                egui::RichText::new("Opgeslagen ✔")
+                                                egui::RichText::new(t("Opgeslagen ✔", "Saved ✔"))
                                                     .font(display(22.0))
                                                     .color(GOOD),
                                             );
                                         } else if big_button(
                                             ui,
-                                            "Gebruik als mijn FTP",
+                                            t("Gebruik als mijn FTP", "Use as my FTP"),
                                             ACCENT,
                                             260.0,
                                         ) {
@@ -1248,11 +1310,11 @@ fn summary(
 
                 ui.horizontal(|ui| {
                     let gap = 26.0;
-                    number(ui, mmss(secs), "tijd", 38.0, TEXT);
+                    number(ui, mmss(secs), t("tijd", "time"), 38.0, TEXT);
                     ui.add_space(gap);
-                    number(ui, format!("{avg:.0} W"), "gemiddeld", 38.0, TEXT);
+                    number(ui, format!("{avg:.0} W"), t("gemiddeld", "average"), 38.0, TEXT);
                     ui.add_space(gap);
-                    number(ui, format!("{np:.0} W"), "genormaliseerd", 38.0, TEXT);
+                    number(ui, format!("{np:.0} W"), t("genormaliseerd", "normalized"), 38.0, TEXT);
                     ui.add_space(gap);
                     number(ui, format!("{tss:.0}"), "tss", 38.0, ACCENT);
                     ui.add_space(gap);
@@ -1263,7 +1325,7 @@ fn summary(
                         number(
                             ui,
                             format!("{mean:.0}"),
-                            "gem. hartslag",
+                            t("gem. hartslag", "avg heart rate"),
                             38.0,
                             egui::Color32::from_rgb(255, 95, 95),
                         );
@@ -1275,7 +1337,10 @@ fn summary(
                 if !s.work.is_empty() && !s.plan.ramp_test {
                     let (nailed, n) = s.nailed();
                     ui.label(
-                        egui::RichText::new(format!("{nailed} van de {n} intervallen gehaald"))
+                        egui::RichText::new(tf!(
+                            "{nailed} van de {n} intervallen gehaald",
+                            "{nailed} of {n} intervals nailed"
+                        ))
                             .font(display(20.0)),
                     );
                     let per_row = ((ui.available_width() / 22.0) as usize).max(1);
@@ -1352,7 +1417,7 @@ fn summary(
                 }
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if big_button(ui, "Terug naar start", ACCENT, 260.0) {
+                    if big_button(ui, t("Terug naar start", "Back to start"), ACCENT, 260.0) {
                         next.set(Screen::Setup);
                     }
                 });
@@ -1466,7 +1531,7 @@ pub fn plan_detail(ui: &mut egui::Ui, plan: &Plan, ftp: f32) {
         );
         let n = plan.work_blocks().len();
         if n > 0 && !plan.ramp_test {
-            ui.label(egui::RichText::new(format!("· {n} blokken")).color(MUTED));
+            ui.label(egui::RichText::new(tf!("· {n} blokken", "· {n} blocks")).color(MUTED));
         }
     });
     ui.add_space(6.0);
@@ -1486,8 +1551,9 @@ pub fn plan_detail(ui: &mut egui::Ui, plan: &Plan, ftp: f32) {
         let seg = &plan.workout.segments[k];
         let w = peak(seg).unwrap_or(0.0) * ftp;
         ui.label(
-            egui::RichText::new(format!(
+            egui::RichText::new(tf!(
                 "Hoofdblokken: {} op {w:.0} W ({:.0}% FTP)",
+                "Main blocks: {} at {w:.0} W ({:.0}% FTP)",
                 duration_text(seg.secs()),
                 peak(seg).unwrap_or(0.0) * 100.0
             ))
@@ -1498,7 +1564,7 @@ pub fn plan_detail(ui: &mut egui::Ui, plan: &Plan, ftp: f32) {
     ui.label(egui::RichText::new(plan.summary).color(ACCENT_SOFT));
     ui.add_space(4.0);
     ui.label(
-        egui::RichText::new("WAAROM WERKT DIT?")
+        egui::RichText::new(t("WAAROM WERKT DIT?", "WHY DOES THIS WORK?"))
             .font(display(15.0))
             .color(MUTED)
             .extra_letter_spacing(1.2),

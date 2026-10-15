@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use ridecore::race::course::Course;
+use ridecore::tf;
 
 use crate::theme::{self, ACCENT, MUTED, TEXT, display};
 use crate::{RaceRes, Screen};
@@ -109,8 +110,9 @@ fn climbs(course: &Course, list: &mut Vec<Caption>) {
         list.push(Caption {
             at_m: c.start_m,
             title: name.clone(),
-            subtitle: format!(
+            subtitle: tf!(
                 "{} · {:.1} km aan {:.1}% · max {:.0}%",
+                "{} · {:.1} km at {:.1}% · max {:.0}%",
                 c.category.label(),
                 c.length_m() / 1000.0,
                 c.avg_pct,

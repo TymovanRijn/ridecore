@@ -14,6 +14,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::t;
+use crate::tf;
+
 const SERVICE: &str = "RideCore Strava";
 /// Strava must list `localhost` as the app's Authorization Callback Domain.
 const CALLBACK_PORT: u16 = 8723;
@@ -45,10 +48,13 @@ fn store(key: &str, value: &str) -> Result<()> {
 /// The app's Strava API credentials, as entered by the rider.
 pub fn save_app_credentials(client_id: &str, client_secret: &str) -> Result<()> {
     if client_id.trim().is_empty() || !client_id.trim().chars().all(|c| c.is_ascii_digit()) {
-        bail!("Client ID is een getal (zie strava.com/settings/api)");
+        bail!(t(
+            "Client ID is een getal (zie strava.com/settings/api)",
+            "The Client ID is a number (see strava.com/settings/api)"
+        ));
     }
     if client_secret.trim().len() < 20 {
-        bail!("Client Secret lijkt niet compleet");
+        bail!(t("Client Secret lijkt niet compleet", "The Client Secret looks incomplete"));
     }
     store("client_id", client_id.trim())?;
     store("client_secret", client_secret.trim())
@@ -108,7 +114,7 @@ fn token_request(form: &[(&str, &str)]) -> Result<TokenResponse> {
     let status = res.status();
     let body = res.body_mut().read_to_string()?;
     if !status.is_success() {
-        bail!("Strava weigerde ({status}): {body}");
+        bail!(tf!("Strava weigerde ({status}): {body}", "Strava refused ({status}): {body}"));
     }
     Ok(serde_json::from_str(&body)?)
 }
@@ -116,10 +122,16 @@ fn token_request(form: &[(&str, &str)]) -> Result<TokenResponse> {
 /// Opens the browser for the rider to authorize RideCore, waits for the
 /// redirect on localhost, exchanges the code and stores the tokens.
 pub fn connect() -> Result<Tokens> {
-    let id = client_id().context("vul eerst je Client ID en Client Secret in")?;
-    let secret = load("client_secret").context("vul eerst je Client Secret in")?;
-    let listener =
-        TcpListener::bind(("127.0.0.1", CALLBACK_PORT)).context("poort 8723 is bezet")?;
+    let id = client_id().context(t(
+        "vul eerst je Client ID en Client Secret in",
+        "enter your Client ID and Client Secret first",
+    ))?;
+    let secret = load("client_secret").context(t(
+        "vul eerst je Client Secret in",
+        "enter your Client Secret first",
+    ))?;
+    let listener = TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
+        .context(t("poort 8723 is bezet", "port 8723 is in use"))?;
     let redirect = format!("http://localhost:{CALLBACK_PORT}/strava");
     let url = format!(
         "https://www.strava.com/oauth/authorize?client_id={id}&response_type=code&redirect_uri={redirect}&approval_prompt=auto&scope=read,activity:read_all,activity:write"
@@ -130,7 +142,10 @@ pub fn connect() -> Result<Tokens> {
     let start = Instant::now();
     let code = loop {
         if start.elapsed() > AUTH_TIMEOUT {
-            bail!("geen antwoord van Strava binnen 3 minuten");
+            bail!(t(
+                "geen antwoord van Strava binnen 3 minuten",
+                "no answer from Strava within 3 minutes"
+            ));
         }
         let Ok((mut stream, _)) = listener.accept() else {
             std::thread::sleep(Duration::from_millis(200));
@@ -154,11 +169,17 @@ pub fn connect() -> Result<Tokens> {
         let (ok, msg) = match (param("code"), param("error")) {
             (Some(c), _) => (
                 Some(c),
-                "RideCore is verbonden met Strava. Je kunt dit tabblad sluiten.",
+                t(
+                    "RideCore is verbonden met Strava. Je kunt dit tabblad sluiten.",
+                    "RideCore is connected to Strava. You can close this tab.",
+                ),
             ),
             (_, Some(_)) => (
                 None,
-                "Toegang geweigerd. Je kunt dit tabblad sluiten en het opnieuw proberen.",
+                t(
+                    "Toegang geweigerd. Je kunt dit tabblad sluiten en het opnieuw proberen.",
+                    "Access denied. You can close this tab and try again.",
+                ),
             ),
             _ => continue,
         };
@@ -172,7 +193,10 @@ pub fn connect() -> Result<Tokens> {
         );
         match ok {
             Some(code) => break code,
-            None => bail!("je hebt geen toegang gegeven op Strava"),
+            None => bail!(t(
+                "je hebt geen toegang gegeven op Strava",
+                "you didn't give access on Strava"
+            )),
         }
     };
 
@@ -202,12 +226,18 @@ pub fn connect() -> Result<Tokens> {
 
 /// A valid access token, refreshed when it is about to expire.
 fn access_token() -> Result<String> {
-    let mut t = tokens().context("niet verbonden met Strava")?;
+    let mut t = tokens().context(crate::i18n::t(
+        "niet verbonden met Strava",
+        "not connected to Strava",
+    ))?;
     if t.expires_at > now() + 120 {
         return Ok(t.access_token);
     }
-    let id = client_id().context("Client ID ontbreekt")?;
-    let secret = load("client_secret").context("Client Secret ontbreekt")?;
+    let id = client_id().context(crate::i18n::t("Client ID ontbreekt", "Client ID missing"))?;
+    let secret = load("client_secret").context(crate::i18n::t(
+        "Client Secret ontbreekt",
+        "Client Secret missing",
+    ))?;
     let r = token_request(&[
         ("client_id", &id),
         ("client_secret", &secret),
@@ -267,10 +297,12 @@ pub fn upload(fit: &[u8], name: &str, description: &str, external_id: &str) -> R
     let status = res.status();
     let text = res.body_mut().read_to_string()?;
     if !status.is_success() {
-        bail!("upload geweigerd ({status}): {text}");
+        bail!(tf!("upload geweigerd ({status}): {text}", "upload refused ({status}): {text}"));
     }
     let mut up: UploadStatus = serde_json::from_str(&text)?;
-    let id = up.id.context("Strava gaf geen upload-id")?;
+    let id = up
+        .id
+        .context(t("Strava gaf geen upload-id", "Strava returned no upload id"))?;
     for _ in 0..30 {
         if let Some(activity) = up.activity_id {
             // Make it a Virtual Ride with its map, as Zwift rides appear.
@@ -278,7 +310,10 @@ pub fn upload(fit: &[u8], name: &str, description: &str, external_id: &str) -> R
             return Ok(format!("https://www.strava.com/activities/{activity}"));
         }
         if let Some(err) = up.error.filter(|e| !e.is_empty()) {
-            bail!("Strava kon de rit niet verwerken: {err}");
+            bail!(tf!(
+                "Strava kon de rit niet verwerken: {err}",
+                "Strava could not process the ride: {err}"
+            ));
         }
         std::thread::sleep(Duration::from_secs(2));
         let mut r = agent
@@ -287,10 +322,11 @@ pub fn upload(fit: &[u8], name: &str, description: &str, external_id: &str) -> R
             .call()?;
         up = serde_json::from_str(&r.body_mut().read_to_string()?)?;
     }
-    bail!(
+    bail!(tf!(
         "Strava is nog bezig ({}); de rit verschijnt zo vanzelf",
+        "Strava is still busy ({}); the ride will show up shortly",
         up.status.unwrap_or_default()
-    )
+    ))
 }
 
 /// Turns an activity into a Virtual Ride (not a trainer ride), so Strava
@@ -310,7 +346,10 @@ pub fn make_virtual_ride(activity: u64, name: Option<&str>) -> Result<()> {
     let status = res.status();
     let body = res.body_mut().read_to_string()?;
     if !status.is_success() {
-        bail!("Strava weigerde de wijziging ({status}): {body}");
+        bail!(tf!(
+            "Strava weigerde de wijziging ({status}): {body}",
+            "Strava refused the change ({status}): {body}"
+        ));
     }
     Ok(())
 }
@@ -327,7 +366,7 @@ pub fn recent_activities(count: u32) -> Result<Vec<serde_json::Value>> {
     let status = res.status();
     let body = res.body_mut().read_to_string()?;
     if !status.is_success() {
-        bail!("Strava weigerde ({status}): {body}");
+        bail!(tf!("Strava weigerde ({status}): {body}", "Strava refused ({status}): {body}"));
     }
     Ok(serde_json::from_str(&body)?)
 }
@@ -342,6 +381,6 @@ fn open_in_browser(url: &str) -> Result<()> {
     std::process::Command::new(cmd)
         .arg(url)
         .spawn()
-        .context("kon de browser niet openen")?;
+        .context(t("kon de browser niet openen", "could not open the browser"))?;
     Ok(())
 }

@@ -13,7 +13,9 @@ pub mod moments;
 pub mod pack;
 
 use crate::physics::{BikeParams, RiderState};
+use crate::i18n::t;
 use crate::rng::Rng;
+use crate::tf;
 use crate::route::Route;
 
 use ai::{Intent, Plan};
@@ -84,11 +86,11 @@ pub enum TeamOrder {
 impl TeamOrder {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Free => "Vrij rijden",
-            Self::Tempo => "Tempo rijden",
-            Self::Chase => "Achtervolgen",
+            Self::Free => t("Vrij rijden", "Ride free"),
+            Self::Tempo => t("Tempo rijden", "Set tempo"),
+            Self::Chase => t("Achtervolgen", "Chase"),
             Self::LeadOut => "Lead-out",
-            Self::Protect => "Bescherm mij",
+            Self::Protect => t("Bescherm mij", "Protect me"),
         }
     }
 }
@@ -279,7 +281,7 @@ impl Race {
         let t = self.riders[self.human].team;
         if self.teams[t].order != order {
             self.teams[t].order = order;
-            self.log(format!("Teamorder: {}", order.label()));
+            self.log(tf!("Teamorder: {}", "Team order: {}", order.label()));
         }
     }
 
@@ -386,7 +388,7 @@ impl Race {
                 self.segment_results[s].push(i);
                 if self.segment_results[s].len() == 1 {
                     let name = self.riders[i].profile.name.clone();
-                    let text = format!("{} wint {}", name, seg.name);
+                    let text = tf!("{} wint {}", "{} wins the {}", name, seg.name);
                     self.events.push(RaceEvent {
                         time: self.time,
                         text,
@@ -409,7 +411,10 @@ impl Race {
         if self.finish.is_empty() {
             let name = self.riders[rider].profile.name.clone();
             let team = self.teams[self.riders[rider].team].spec.name.clone();
-            self.log(format!("🏆 {name} ({team}) wint de wedstrijd!"));
+            self.log(tf!(
+                "🏆 {name} ({team}) wint de wedstrijd!",
+                "🏆 {name} ({team}) wins the race!"
+            ));
         }
         let at = self.finish.partition_point(|f| f.time <= time);
         self.finish.insert(

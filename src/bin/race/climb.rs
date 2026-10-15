@@ -4,7 +4,9 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
+use ridecore::i18n::t;
 use ridecore::race::course::Climb;
+use ridecore::tf;
 
 use crate::theme::grade_color;
 use crate::{RaceRes, Screen};
@@ -77,8 +79,9 @@ fn header(ui: &mut egui::Ui, race: &ridecore::race::Race, climb: &Climb, index: 
     let course = &race.course;
     let what = match &climb.name {
         Some(name) => format!("{name} · {}", climb.category.label()),
-        None => format!(
+        None => tf!(
             "{} · klim {}/{}",
+            "{} · climb {}/{}",
             climb.category.label(),
             index + 1,
             course.climbs.len()
@@ -100,14 +103,14 @@ fn header(ui: &mut egui::Ui, race: &ridecore::race::Race, climb: &Climb, index: 
             stat(
                 ui,
                 format!("{:.0} m", climb.start_m - d),
-                "TOT DE VOET",
+                t("TOT DE VOET", "TO THE FOOT"),
                 egui::Color32::WHITE,
             );
             ui.add_space(18.0);
             stat(
                 ui,
                 format!("{:.0}%", climb.max_pct),
-                "STEILSTE 100 M",
+                t("STEILSTE 100 M", "STEEPEST 100 M"),
                 grade_color(climb.max_pct),
             );
         });
@@ -125,25 +128,25 @@ fn header(ui: &mut egui::Ui, race: &ridecore::race::Race, climb: &Climb, index: 
         stat(
             ui,
             format!("{:.2} km", left / 1000.0),
-            "NOG TE GAAN",
+            t("NOG TE GAAN", "TO GO"),
             egui::Color32::WHITE,
         );
         ui.add_space(18.0);
         stat(
             ui,
             format!("{:.0} m", up.max(0.0)),
-            "NOG OMHOOG",
+            t("NOG OMHOOG", "STILL TO CLIMB"),
             egui::Color32::WHITE,
         );
         ui.add_space(18.0);
         stat(
             ui,
             format!("{avg_left:.1}%"),
-            "GEM. RESTANT",
+            t("GEM. RESTANT", "AVG REMAINING"),
             grade_color(avg_left),
         );
         ui.add_space(18.0);
-        stat(ui, format!("{now:.1}%"), "NU", grade_color(now));
+        stat(ui, format!("{now:.1}%"), t("NU", "NOW"), grade_color(now));
     });
 }
 

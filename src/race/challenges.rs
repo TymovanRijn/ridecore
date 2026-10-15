@@ -6,7 +6,9 @@
 use super::Race;
 use super::ai::Intent;
 use super::course::{SEGMENT_POINTS, SegmentKind};
+use crate::i18n::{ordinal, t};
 use crate::rng::Rng;
+use crate::tf;
 
 /// Quiet time between challenges.
 const GAP_MIN_S: f32 = 70.0;
@@ -160,8 +162,11 @@ impl ChallengeTracker {
             let name = race.riders[rider].profile.name.clone();
             let c = Challenge {
                 kind: Kind::FollowAttack { rider },
-                title: "AANVAL! Spring mee".into(),
-                detail: format!("{name} valt aan · zit 15 s in zijn wiel"),
+                title: t("AANVAL! Spring mee", "ATTACK! Go with it").into(),
+                detail: tf!(
+                    "{name} valt aan · zit 15 s in zijn wiel",
+                    "{name} attacks · sit on the wheel for 15 s"
+                ),
                 xp: 150,
                 time_left: 40.0,
                 held: 0.0,
@@ -288,8 +293,8 @@ impl ChallengeTracker {
         let watts = (ftp * 1.2 / 10.0).round() * 10.0;
         options.push(mk(
             Kind::Effort { watts, secs: 15.0 },
-            "Versnelling",
-            format!("Trap 15 s boven {watts:.0} W"),
+            t("Versnelling", "Surge"),
+            tf!("Trap 15 s boven {watts:.0} W", "Ride above {watts:.0} W for 15 s"),
             80,
             30.0,
         ));
@@ -298,16 +303,16 @@ impl ChallengeTracker {
                 rpm: 100.0,
                 secs: 20.0,
             },
-            "Souplesse",
-            "Draai 20 s boven 100 rpm".into(),
+            t("Souplesse", "Spin it"),
+            t("Draai 20 s boven 100 rpm", "Spin above 100 rpm for 20 s").into(),
             50,
             40.0,
         ));
         if group >= 6 {
             options.push(mk(
                 Kind::Shelter { secs: 45.0 },
-                "Spaar je benen",
-                "Zit 45 s goed in het wiel".into(),
+                t("Spaar je benen", "Save your legs"),
+                t("Zit 45 s goed in het wiel", "Stay sheltered for 45 s").into(),
                 60,
                 75.0,
             ));
@@ -316,8 +321,11 @@ impl ChallengeTracker {
             let target = (group / 4).clamp(3, 8);
             options.push(mk(
                 Kind::MoveUp { place: target },
-                "Schuif op",
-                format!("Rij naar de top {target} van je groep"),
+                t("Schuif op", "Move up"),
+                tf!(
+                    "Rij naar de top {target} van je groep",
+                    "Get into the top {target} of your group"
+                ),
                 90,
                 60.0,
             ));
@@ -325,8 +333,8 @@ impl ChallengeTracker {
         if (2..=12).contains(&group) || place <= 3 {
             options.push(mk(
                 Kind::Pull { secs: 20.0 },
-                "Kopwerk",
-                "Trek 20 s op kop van je groep".into(),
+                t("Kopwerk", "Pull"),
+                t("Trek 20 s op kop van je groep", "Ride on the front of your group for 20 s").into(),
                 70,
                 50.0,
             ));
@@ -346,12 +354,13 @@ impl ChallengeTracker {
                     let xp = SEGMENT_POINTS[k] * 15;
                     self.xp += xp;
                     out.push(Event::Bonus {
-                        what: format!(
-                            "{}e op de {}",
-                            k + 1,
+                        what: tf!(
+                            "{} op de {}",
+                            "{} on the {}",
+                            ordinal(k + 1),
                             match race.course.segments[s].kind {
-                                SegmentKind::Sprint => "tussensprint",
-                                SegmentKind::Kom => "berg",
+                                SegmentKind::Sprint => t("tussensprint", "intermediate sprint"),
+                                SegmentKind::Kom => t("berg", "climb"),
                             }
                         ),
                         xp,
@@ -369,7 +378,7 @@ impl ChallengeTracker {
                 100 + (300 * (field - p - 1) / field.max(1)) as u32 + if p < 3 { 200 } else { 0 };
             self.xp += xp;
             out.push(Event::Bonus {
-                what: format!("{}e plaats", p + 1),
+                what: tf!("{} plaats", "{} place", ordinal(p + 1)),
                 xp,
             });
         }

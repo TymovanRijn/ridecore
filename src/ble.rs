@@ -110,16 +110,19 @@ async fn find_trainer() -> Result<Peripheral> {
         }
     }
     adapter.stop_scan().await.ok();
-    Err(anyhow!(
-        "no FTMS trainer found; is the KICKR CORE awake and not connected to another app?"
-    ))
+    Err(anyhow!(crate::i18n::t(
+        "geen FTMS-trainer gevonden; is je trainer wakker en niet met een andere app verbonden?",
+        "no FTMS trainer found; is your trainer awake and not connected to another app?"
+    )))
 }
 
 async fn session(
     events: &Sender<TrainerEvent>,
     commands: &mut mpsc::UnboundedReceiver<ControlRequest>,
 ) -> Result<()> {
-    let _ = events.send(TrainerEvent::Status("Scanning for trainer…".into()));
+    let _ = events.send(TrainerEvent::Status(
+        crate::i18n::t("Trainer zoeken…", "Looking for your trainer…").into(),
+    ));
     let trainer = find_trainer().await?;
     trainer.connect().await.context("connect failed")?;
     trainer.discover_services().await?;

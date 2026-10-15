@@ -10,6 +10,8 @@ use bevy_egui::egui;
 
 use ridecore::card::{self, CardInput, RideStats};
 use ridecore::fit;
+use ridecore::i18n::{ordinal, t};
+use ridecore::tf;
 use ridecore::race::course::SegmentKind;
 use ridecore::strava;
 
@@ -41,8 +43,16 @@ pub fn save_ride(res: &RaceRes) -> Result<SavedRide, String> {
 
     let mut badges = Vec::new();
     for (kind, jersey, what) in [
-        (SegmentKind::Sprint, "Groene trui", "Sprintpunten"),
-        (SegmentKind::Kom, "Bolletjestrui", "Bergpunten"),
+        (
+            SegmentKind::Sprint,
+            t("Groene trui", "Green jersey"),
+            t("Sprintpunten", "Sprint points"),
+        ),
+        (
+            SegmentKind::Kom,
+            t("Bolletjestrui", "Polka-dot jersey"),
+            t("Bergpunten", "Mountain points"),
+        ),
     ] {
         let pts = race.points(kind);
         if pts.first().is_some_and(|&(r, _)| r == race.human) {
@@ -52,26 +62,31 @@ pub fn save_ride(res: &RaceRes) -> Result<SavedRide, String> {
             badges.push(format!("{what} {p}"));
         }
     }
-    badges.push(format!("In het wiel {sheltered:.0}%"));
+    badges.push(tf!("In het wiel {sheltered:.0}%", "Sheltered {sheltered:.0}%"));
     let (xp, done, tried) = res.xp;
     if tried > 0 || xp > 0 {
-        badges.push(format!("{xp} XP · uitdagingen {done}/{tried}"));
+        badges.push(tf!(
+            "{xp} XP · uitdagingen {done}/{tried}",
+            "{xp} XP · challenges {done}/{tried}"
+        ));
     }
 
     let dir = rides_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Map aanmaken mislukt: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        tf!("Map aanmaken mislukt: {e}", "Could not create the folder: {e}")
+    })?;
     let stamp = samples
         .first()
         .map(|s| s.unix_time)
         .unwrap_or_else(fit::now_unix);
     let fit_path = dir.join(format!("race-{stamp}.fit"));
     std::fs::write(&fit_path, fit::encode_activity(samples))
-        .map_err(|e| format!("Opslaan mislukt: {e}"))?;
+        .map_err(|e| tf!("Opslaan mislukt: {e}", "Saving failed: {e}"))?;
 
     let [r, g, b] = race.player_team().spec.color;
     let png = card::render(&CardInput {
         title: route.name.clone(),
-        subtitle: format!("{} · {}", route.region, card::date_nl(stamp)),
+        subtitle: format!("{} · {}", route.region, card::date(stamp)),
         place: Some((place, field)),
         stats: stats.clone(),
         rider_kg: me.profile.kg,
@@ -83,8 +98,10 @@ pub fn save_ride(res: &RaceRes) -> Result<SavedRide, String> {
     let card = std::fs::write(&card_path, png).ok().map(|_| card_path);
 
     let wkg = stats.avg_power / me.profile.kg;
-    let description = format!(
-        "🏁 {place}e van {field} · {} ({})\n⚡ {:.0} W gem · {:.0} W NP · {wkg:.2} W/kg · max {} W\n⛰️ {:.0} hoogtemeters · {:.1} km · {:.1} km/u\n🚴 {}\nGereden in RideCore: singleplayer wedstrijd tegen AI-teams op de echte route.",
+    let place_text = ordinal(place);
+    let description = tf!(
+        "🏁 {place_text} van {field} · {} ({})\n⚡ {:.0} W gem · {:.0} W NP · {wkg:.2} W/kg · max {} W\n⛰️ {:.0} hoogtemeters · {:.1} km · {:.1} km/u\n🚴 {}\nGereden in RideCore: singleplayer wedstrijd tegen AI-teams op de echte route.",
+        "🏁 {place_text} of {field} · {} ({})\n⚡ {:.0} W avg · {:.0} W NP · {wkg:.2} W/kg · max {} W\n⛰️ {:.0} m elevation · {:.1} km · {:.1} km/h\n🚴 {}\nRidden in RideCore: a single-player race against AI teams on the real route.",
         route.name,
         route.region,
         stats.avg_power,
@@ -98,7 +115,11 @@ pub fn save_ride(res: &RaceRes) -> Result<SavedRide, String> {
     Ok(SavedRide {
         fit: fit_path,
         card,
-        name: format!("RideCore: {} – {place}e van {field}", route.name),
+        name: tf!(
+            "RideCore: {} – {place_text} van {field}",
+            "RideCore: {} – {place_text} of {field}",
+            route.name
+        ),
         description,
     })
 }
@@ -115,17 +136,24 @@ pub fn save_training(
     let route = &res.race.course.route;
     let stats = RideStats::from_samples(samples);
     let dir = rides_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Map aanmaken mislukt: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        tf!("Map aanmaken mislukt: {e}", "Could not create the folder: {e}")
+    })?;
     let stamp = samples
         .first()
         .map(|s| s.unix_time)
         .unwrap_or_else(fit::now_unix);
     let fit_path = dir.join(format!("training-{stamp}.fit"));
     std::fs::write(&fit_path, fit::encode_activity(samples))
-        .map_err(|e| format!("Opslaan mislukt: {e}"))?;
+        .map_err(|e| tf!("Opslaan mislukt: {e}", "Saving failed: {e}"))?;
     let png = card::render(&CardInput {
         title: title.to_string(),
-        subtitle: format!("Training · {} · {}", route.name, card::date_nl(stamp)),
+        subtitle: tf!(
+            "Training · {} · {}",
+            "Workout · {} · {}",
+            route.name,
+            card::date(stamp)
+        ),
         place: None,
         stats: stats.clone(),
         rider_kg: me.profile.kg,
@@ -135,8 +163,9 @@ pub fn save_training(
     });
     let card_path = dir.join(format!("training-{stamp}.png"));
     let card = std::fs::write(&card_path, png).ok().map(|_| card_path);
-    let description = format!(
+    let description = tf!(
         "🏋️ {title}\n⚡ {:.0} W gem · {:.0} W NP · {:.2} W/kg\n🚴 {}\nGereden in RideCore, in ERG-modus op {}.",
+        "🏋️ {title}\n⚡ {:.0} W avg · {:.0} W NP · {:.2} W/kg\n🚴 {}\nRidden in RideCore, in ERG mode on {}.",
         stats.avg_power,
         stats.norm_power,
         stats.avg_power / me.profile.kg,
@@ -146,7 +175,7 @@ pub fn save_training(
     Ok(SavedRide {
         fit: fit_path,
         card,
-        name: format!("RideCore training: {title}"),
+        name: tf!("RideCore training: {title}", "RideCore workout: {title}"),
         description,
     })
 }
@@ -240,7 +269,7 @@ impl StravaUi {
         let loaded = self.loaded.clone();
         std::thread::spawn(move || {
             let id = strava::client_id().unwrap_or_default();
-            let who = strava::tokens().map(|t| t.athlete.unwrap_or_else(|| "je account".into()));
+            let who = strava::tokens().map(|tok| tok.athlete.unwrap_or_else(|| t("je account", "your account").into()));
             if let Ok(mut l) = loaded.lock() {
                 *l = Some((id, who));
             }
@@ -250,7 +279,7 @@ impl StravaUi {
     pub fn upload(&self, ride: &SavedRide) {
         let ride = ride.clone();
         let url = self.activity_url.clone();
-        self.set_status("Uploaden naar Strava…");
+        self.set_status(t("Uploaden naar Strava…", "Uploading to Strava…"));
         self.run(move |status| {
             let result = std::fs::read(&ride.fit)
                 .map_err(anyhow::Error::from)
@@ -267,10 +296,13 @@ impl StravaUi {
                     if let Ok(mut u) = url.lock() {
                         *u = Some(link);
                     }
-                    "Geüpload naar Strava! Voeg de stats-kaart toe als foto in de Strava-app."
-                        .to_string()
+                    t(
+                        "Geüpload naar Strava! Voeg de stats-kaart toe als foto in de Strava-app.",
+                        "Uploaded to Strava! Add the stats card as a photo in the Strava app.",
+                    )
+                    .to_string()
                 }
-                Err(e) => format!("Upload mislukt: {e:#}"),
+                Err(e) => tf!("Upload mislukt: {e:#}", "Upload failed: {e:#}"),
             };
             if let Ok(mut s) = status.lock() {
                 *s = msg;
@@ -284,14 +316,20 @@ pub fn settings_ui(ui: &mut egui::Ui, st: &mut StravaUi) {
     st.poll();
     if let Some(who) = st.connected.clone() {
         ui.horizontal(|ui| {
-            ui.label(format!("Verbonden met Strava als {who}"));
-            if ui.button("Ontkoppel").clicked() {
+            ui.label(tf!("Verbonden met Strava als {who}", "Connected to Strava as {who}"));
+            if ui.button(t("Ontkoppel", "Disconnect")).clicked() {
                 strava::disconnect();
                 st.connected = None;
             }
         });
     } else {
-        ui.label(egui::RichText::new("Eenmalig: maak een API-app op strava.com/settings/api en zet 'Authorization Callback Domain' op localhost.").weak());
+        ui.label(
+            egui::RichText::new(t(
+                "Eenmalig: maak een API-app op strava.com/settings/api en zet 'Authorization Callback Domain' op localhost.",
+                "Once: create an API app at strava.com/settings/api and set 'Authorization Callback Domain' to localhost.",
+            ))
+            .weak(),
+        );
         egui::Grid::new("strava")
             .num_columns(2)
             .spacing([12.0, 6.0])
@@ -304,12 +342,15 @@ pub fn settings_ui(ui: &mut egui::Ui, st: &mut StravaUi) {
                     egui::TextEdit::singleline(&mut st.client_secret)
                         .password(true)
                         .desired_width(260.0)
-                        .hint_text("wordt in je Sleutelhanger bewaard"),
+                        .hint_text(t(
+                            "wordt in je Sleutelhanger bewaard",
+                            "kept in your macOS Keychain",
+                        )),
                 );
                 ui.end_row();
             });
         if ui
-            .add_enabled(!st.busy(), egui::Button::new("Verbind met Strava"))
+            .add_enabled(!st.busy(), egui::Button::new(t("Verbind met Strava", "Connect to Strava")))
             .clicked()
         {
             let saved = if st.client_secret.is_empty() {
@@ -320,11 +361,18 @@ pub fn settings_ui(ui: &mut egui::Ui, st: &mut StravaUi) {
             match saved {
                 Ok(()) => {
                     st.client_secret.clear();
-                    st.set_status("Je browser opent: log in en klik op 'Toestaan'…");
+                    st.set_status(t(
+                        "Je browser opent: log in en klik op 'Toestaan'…",
+                        "Your browser opens: log in and click 'Authorize'…",
+                    ));
                     st.run(|status| {
                         let msg = match strava::connect() {
-                            Ok(t) => format!("Verbonden als {}", t.athlete.unwrap_or_default()),
-                            Err(e) => format!("Verbinden mislukt: {e:#}"),
+                            Ok(tok) => tf!(
+                                "Verbonden als {}",
+                                "Connected as {}",
+                                tok.athlete.unwrap_or_default()
+                            ),
+                            Err(e) => tf!("Verbinden mislukt: {e:#}", "Connecting failed: {e:#}"),
                         };
                         if let Ok(mut s) = status.lock() {
                             *s = msg;

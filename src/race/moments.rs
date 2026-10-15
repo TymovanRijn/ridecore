@@ -3,6 +3,8 @@
 
 use super::Race;
 use super::course::{SEGMENT_POINTS, SegmentKind};
+use crate::i18n::t;
+use crate::tf;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Moment {
@@ -91,16 +93,22 @@ impl Race {
         if left < 300.0 {
             return Some(Objective {
                 title: "SPRINT!".into(),
-                detail: format!("nog {:.0} m · P{} in je groep", left, in_group),
+                detail: tf!(
+                    "nog {:.0} m · P{} in je groep",
+                    "{:.0} m to go · P{} in your group",
+                    left,
+                    in_group
+                ),
                 progress: Some(1.0 - left as f32 / 300.0),
                 urgent: true,
             });
         }
         if left < 3000.0 {
             return Some(Objective {
-                title: format!("Finale · {:.1} km", left / 1000.0),
-                detail: format!(
+                title: tf!("Finale · {:.1} km", "Finale · {:.1} km", left / 1000.0),
+                detail: tf!(
                     "Je zit P{} in je groep, P{} in de koers. Spaar je voor de laatste 300 m!",
+                    "You're P{} in your group, P{} in the race. Save it for the last 300 m!",
                     in_group,
                     self.position(self.human)
                 ),
@@ -112,12 +120,24 @@ impl Race {
             let to_line = seg.end_m - me.dist;
             if to_line < 1500.0 && seg.end_m < self.course.total_m - 1.0 {
                 let (name, verb) = match seg.kind {
-                    SegmentKind::Sprint => ("Tussensprint", "Punten voor de eerste 5"),
-                    SegmentKind::Kom => ("Bergsprint", "Bergpunten voor de eerste 5 boven"),
+                    SegmentKind::Sprint => (
+                        t("Tussensprint", "Intermediate sprint"),
+                        t("Punten voor de eerste 5", "Points for the first 5"),
+                    ),
+                    SegmentKind::Kom => (
+                        t("Bergsprint", "KOM"),
+                        t(
+                            "Bergpunten voor de eerste 5 boven",
+                            "Mountain points for the first 5 over the top",
+                        ),
+                    ),
                 };
                 return Some(Objective {
-                    title: format!("{name} over {:.0} m", to_line),
-                    detail: format!("{verb} · je zit P{in_group} in je groep"),
+                    title: tf!("{name} over {:.0} m", "{name} in {:.0} m", to_line),
+                    detail: tf!(
+                        "{verb} · je zit P{in_group} in je groep",
+                        "{verb} · you're P{in_group} in your group"
+                    ),
                     progress: Some(1.0 - to_line as f32 / 1500.0),
                     urgent: false,
                 });
@@ -131,16 +151,17 @@ impl Race {
             let gap = mine.gap_s - ahead.gap_s;
             if gap < CHASE_HORIZON_S {
                 let name = if g - 1 == 0 {
-                    "Kopgroep"
+                    t("Kopgroep", "Lead group")
                 } else if g - 1 == peloton {
                     "Peloton"
                 } else {
-                    "Groep voor je"
+                    t("Groep voor je", "Group ahead")
                 };
                 return Some(Objective {
-                    title: format!("{name} op {:.0} s", gap),
-                    detail: format!(
+                    title: tf!("{name} op {:.0} s", "{name} at {:.0} s", gap),
+                    detail: tf!(
                         "{} renners · haal ze terug en zit in het wiel!",
+                        "{} riders · bring them back and get on the wheel!",
                         ahead.riders.len()
                     ),
                     progress: Some(1.0 - gap / CHASE_HORIZON_S),
@@ -151,8 +172,12 @@ impl Race {
         if g < peloton {
             let lead = self.groups[peloton].gap_s - self.groups[g].gap_s;
             return Some(Objective {
-                title: format!("In de vlucht · +{:.0} s", lead),
-                detail: "Deel het werk, maar houd W′ over voor de finale".into(),
+                title: tf!("In de vlucht · +{:.0} s", "In the break · +{:.0} s", lead),
+                detail: t(
+                    "Deel het werk, maar houd W′ over voor de finale",
+                    "Share the work, but keep some W′ for the finale",
+                )
+                .into(),
                 progress: None,
                 urgent: false,
             });

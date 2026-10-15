@@ -3,7 +3,9 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
+use ridecore::i18n::{ordinal, t};
 use ridecore::race::Race;
+use ridecore::tf;
 use ridecore::race::course::SegmentKind;
 
 use crate::share::{self, StravaUi};
@@ -25,7 +27,7 @@ impl Plugin for ResultsPlugin {
 
 fn gap_text(gap_s: f32) -> String {
     if gap_s < 0.5 {
-        "z.t.".into()
+        t("z.t.", "s.t.").into()
     } else {
         let s = gap_s.round() as u32;
         format!("+{}:{:02}", s / 60, s % 60)
@@ -64,7 +66,8 @@ fn results_ui(
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let race = &res.race;
-    egui::Window::new("Uitslag")
+    egui::Window::new(t("Uitslag", "Results"))
+        .id(egui::Id::new("results"))
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .collapsible(false)
         .resizable(false)
@@ -73,9 +76,10 @@ fn results_ui(
             if let Some(p) = race.finish.iter().position(|f| f.rider == race.human) {
                 let f = &race.finish[p];
                 ui.heading(
-                    egui::RichText::new(format!(
-                        "Je werd {}e van {} · {}",
-                        p + 1,
+                    egui::RichText::new(tf!(
+                        "Je werd {} van {} · {}",
+                        "You finished {} of {} · {}",
+                        ordinal(p + 1),
                         race.riders.len(),
                         gap_text(f.gap_s)
                     ))
@@ -84,7 +88,10 @@ fn results_ui(
             }
             let (xp, done, tried) = res.xp;
             ui.label(
-                egui::RichText::new(format!("{xp} XP · {done} van {tried} uitdagingen gehaald"))
+                egui::RichText::new(tf!(
+                    "{xp} XP · {done} van {tried} uitdagingen gehaald",
+                    "{xp} XP · {done} of {tried} challenges completed"
+                ))
                     .size(20.0)
                     .strong()
                     .color(egui::Color32::from_rgb(255, 200, 40)),
@@ -92,7 +99,7 @@ fn results_ui(
             share_panel(ui, &res, &mut strava);
             ui.add_space(8.0);
             ui.columns(2, |cols| {
-                cols[0].strong("Einduitslag");
+                cols[0].strong(t("Einduitslag", "Final classification"));
                 egui::ScrollArea::vertical()
                     .id_salt("gc")
                     .max_height(420.0)
@@ -108,15 +115,18 @@ fn results_ui(
                         let still = race.riders.len() - race.finish.len();
                         if still > 0 {
                             ui.label(
-                                egui::RichText::new(format!("{still} renners nog onderweg…"))
+                                egui::RichText::new(tf!(
+                                    "{still} renners nog onderweg…",
+                                    "{still} riders still on the road…"
+                                ))
                                     .weak(),
                             );
                         }
                     });
 
                 for (title, kind) in [
-                    ("Puntenklassement (sprints)", SegmentKind::Sprint),
-                    ("Bergklassement", SegmentKind::Kom),
+                    (t("Puntenklassement (sprints)", "Points (sprints)"), SegmentKind::Sprint),
+                    (t("Bergklassement", "Mountains"), SegmentKind::Kom),
                 ] {
                     let pts = race.points(kind);
                     if pts.is_empty() {
@@ -134,7 +144,10 @@ fn results_ui(
                     cols[1].add_space(10.0);
                 }
 
-                cols[1].strong("Ploegenklassement (beste 3 tijden)");
+                cols[1].strong(t(
+                    "Ploegenklassement (beste 3 tijden)",
+                    "Teams (best 3 times)",
+                ));
                 egui::Grid::new("teams")
                     .num_columns(2)
                     .striped(true)
@@ -150,13 +163,17 @@ fn results_ui(
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui
-                    .button(egui::RichText::new("Nieuwe wedstrijd").size(18.0))
+                    .button(egui::RichText::new(t("Nieuwe wedstrijd", "New race")).size(18.0))
                     .clicked()
                 {
                     next.set(Screen::Setup);
                 }
                 ui.label(
-                    egui::RichText::new("Je kunt uitfietsen terwijl de rest binnenkomt.").weak(),
+                    egui::RichText::new(t(
+                        "Je kunt uitfietsen terwijl de rest binnenkomt.",
+                        "You can cool down while the others come in.",
+                    ))
+                    .weak(),
                 );
             });
         });
@@ -168,7 +185,7 @@ pub fn share_panel(ui: &mut egui::Ui, res: &RaceRes, strava: &mut StravaUi) {
     strava.poll();
     match &res.saved {
         None => {
-            ui.label("Rit opslaan…");
+            ui.label(t("Rit opslaan…", "Saving ride…"));
         }
         Some(Err(e)) => {
             ui.colored_label(egui::Color32::RED, e);
@@ -180,27 +197,34 @@ pub fn share_panel(ui: &mut egui::Ui, res: &RaceRes, strava: &mut StravaUi) {
                 if ui
                     .add_enabled(
                         can_upload,
-                        egui::Button::new(egui::RichText::new("Upload naar Strava").size(17.0)),
+                        egui::Button::new(egui::RichText::new(t("Upload naar Strava", "Upload to Strava")).size(17.0)),
                     )
                     .clicked()
                 {
                     strava.upload(ride);
                 }
                 if let Some(card) = &ride.card {
-                    if ui.button("Open stats-kaart").clicked() {
+                    if ui.button(t("Open stats-kaart", "Open stats card")).clicked() {
                         share::open_file(card);
                     }
-                    if ui.button("Kopieer kaart").clicked() && share::copy_image(card) {
-                        strava.note("Kaart gekopieerd: plak hem als foto bij je Strava-rit.");
+                    if ui.button(t("Kopieer kaart", "Copy card")).clicked() && share::copy_image(card) {
+                        strava.note(t(
+                            "Kaart gekopieerd: plak hem als foto bij je Strava-rit.",
+                            "Card copied: paste it as a photo on your Strava ride.",
+                        ));
                     }
                 }
                 if let Some(url) = &uploaded {
-                    ui.hyperlink_to("Bekijk op Strava", url);
+                    ui.hyperlink_to(t("Bekijk op Strava", "View on Strava"), url);
                 }
             });
             if strava.connected.is_none() {
                 ui.label(
-                    egui::RichText::new("Verbind Strava in het startscherm om te uploaden.").weak(),
+                    egui::RichText::new(t(
+                        "Verbind Strava in het startscherm om te uploaden.",
+                        "Connect Strava on the start screen to upload.",
+                    ))
+                    .weak(),
                 );
             }
             let status = strava.status();
@@ -208,7 +232,7 @@ pub fn share_panel(ui: &mut egui::Ui, res: &RaceRes, strava: &mut StravaUi) {
                 ui.label(status);
             }
             ui.label(
-                egui::RichText::new(format!("Opgeslagen in {}", ride.fit.display()))
+                egui::RichText::new(tf!("Opgeslagen in {}", "Saved in {}", ride.fit.display()))
                     .weak()
                     .small(),
             );

@@ -66,6 +66,9 @@ impl RaceRes {
 pub const SKY: Color = world::HAZE;
 
 fn main() {
+    // Before anything builds text: the language from the saved profile.
+    let profile = ridecore::profile::Profile::load();
+    ridecore::i18n::set_lang(ridecore::i18n::startup_lang(&profile.lang));
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {

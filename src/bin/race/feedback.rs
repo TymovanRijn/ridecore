@@ -5,7 +5,9 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
+use ridecore::i18n::{ordinal, t};
 use ridecore::race::challenges::{ChallengeTracker, Event};
+use ridecore::tf;
 use ridecore::race::course::SegmentKind;
 use ridecore::race::moments::{Moment, MomentTracker};
 
@@ -78,8 +80,8 @@ impl Plugin for FeedbackPlugin {
 
 fn jersey_name(kind: SegmentKind) -> &'static str {
     match kind {
-        SegmentKind::Sprint => "groene trui",
-        SegmentKind::Kom => "bolletjestrui",
+        SegmentKind::Sprint => t("groene trui", "green jersey"),
+        SegmentKind::Kom => t("bolletjestrui", "polka-dot jersey"),
     }
 }
 
@@ -113,74 +115,86 @@ fn detect_moments(
                 points,
             } => {
                 let what = if kind == SegmentKind::Sprint {
-                    "TUSSENSPRINT"
+                    t("TUSSENSPRINT", "SPRINT")
                 } else {
                     "KOM"
                 };
                 let title = if place == 1 {
-                    format!("{what} GEWONNEN!")
+                    tf!("{what} GEWONNEN!", "{what} WON!")
                 } else {
-                    format!("{place}e bij de {}", what.to_lowercase())
+                    tf!(
+                        "{} bij de {}",
+                        "{} at the {}",
+                        ordinal(place),
+                        what.to_lowercase()
+                    )
                 };
                 (
                     title,
-                    format!("+{points} punten"),
+                    tf!("+{points} punten", "+{points} points"),
                     if place == 1 { GOLD } else { GOOD },
                     Some((&bank.chime, 0.7)),
                 )
             }
             Moment::JerseyTaken(kind) => (
-                format!("Je pakt de {}!", jersey_name(kind)),
-                "Leider in het klassement".into(),
+                tf!("Je pakt de {}!", "You take the {}!", jersey_name(kind)),
+                t("Leider in het klassement", "Leading the classification").into(),
                 GOLD,
                 Some((&bank.fanfare, 0.6)),
             ),
             Moment::JerseyLost(kind) => (
-                format!("{} kwijt", jersey_name(kind)),
-                "Pak hem terug bij de volgende kans".into(),
+                tf!("{} kwijt", "{} lost", jersey_name(kind)),
+                t("Pak hem terug bij de volgende kans", "Take it back at the next chance").into(),
                 egui::Color32::LIGHT_GRAY,
                 None,
             ),
             Moment::LastLap => (
-                "LAATSTE RONDE".into(),
-                "Nu telt het!".into(),
+                t("LAATSTE RONDE", "LAST LAP").into(),
+                t("Nu telt het!", "This is where it counts!").into(),
                 GOLD,
                 Some((&bank.bell, 0.8)),
             ),
             Moment::Bridged => (
-                "Aangesloten!".into(),
-                "Zit in het wiel en herstel".into(),
+                t("Aangesloten!", "Bridged across!").into(),
+                t("Zit in het wiel en herstel", "Sit on a wheel and recover").into(),
                 GOOD,
                 Some((&bank.chime, 0.4)),
             ),
             Moment::Dropped => (
-                "Gelost".into(),
-                "Rij je eigen tempo of zet alles op alles".into(),
+                t("Gelost", "Dropped").into(),
+                t(
+                    "Rij je eigen tempo of zet alles op alles",
+                    "Ride your own pace or go all in",
+                )
+                .into(),
                 BAD,
                 None,
             ),
             Moment::InBreak => (
-                "Je zit in de vlucht!".into(),
-                "Het peloton laat je gaan".into(),
+                t("Je zit in de vlucht!", "You're in the break!").into(),
+                t("Het peloton laat je gaan", "The peloton lets you go").into(),
                 INFO,
                 Some((&bank.chime, 0.5)),
             ),
             Moment::EmptyTank => (
-                "W′ bijna leeg!".into(),
-                "Zoek een wiel en herstel".into(),
+                t("W′ bijna leeg!", "W′ almost empty!").into(),
+                t("Zoek een wiel en herstel", "Find a wheel and recover").into(),
                 BAD,
                 None,
             ),
             Moment::Finish { place } => {
                 let (title, sting) = match place {
-                    1 => ("OVERWINNING!".to_string(), &bank.fanfare),
-                    2 | 3 => (format!("PODIUM! {place}e"), &bank.fanfare),
-                    4..=10 => (format!("Top 10! {place}e"), &bank.chime),
-                    _ => (format!("Binnen als {place}e"), &bank.chime),
+                    1 => (t("OVERWINNING!", "VICTORY!").to_string(), &bank.fanfare),
+                    2 | 3 => (format!("PODIUM! {}", ordinal(place)), &bank.fanfare),
+                    4..=10 => (format!("Top 10! {}", ordinal(place)), &bank.chime),
+                    _ => (
+                        tf!("Binnen als {}", "Finished {}", ordinal(place)),
+                        &bank.chime,
+                    ),
                 };
                 (
                     title,
-                    "Goed gereden!".into(),
+                    t("Goed gereden!", "Well ridden!").into(),
                     if place <= 3 { GOLD } else { GOOD },
                     Some((sting, 0.8)),
                 )
@@ -208,20 +222,24 @@ fn detect_moments(
             Event::Completed { title, xp, streak } => {
                 fb.xp_at = now;
                 let streak = if streak >= 2 {
-                    format!(" · reeks x{streak}!")
+                    tf!(" · reeks x{streak}!", " · streak x{streak}!")
                 } else {
                     String::new()
                 };
                 (
-                    format!("{title} gelukt!"),
+                    tf!("{title} gelukt!", "{title} done!"),
                     format!("+{xp} XP{streak}"),
                     GOLD,
                     Some((&bank.chime, 0.7)),
                 )
             }
             Event::Failed { title } => (
-                format!("{title} gemist"),
-                "Reeks verloren · volgende kans komt eraan".into(),
+                tf!("{title} gemist", "{title} missed"),
+                t(
+                    "Reeks verloren · volgende kans komt eraan",
+                    "Streak lost · another chance is coming",
+                )
+                .into(),
                 egui::Color32::LIGHT_GRAY,
                 None,
             ),
@@ -332,13 +350,13 @@ fn draw_feedback(
                         );
                         if ch.streak > 0 {
                             ui.label(
-                                egui::RichText::new(format!("reeks x{:.1}", ch.multiplier()))
+                                egui::RichText::new(tf!("reeks x{:.1}", "streak x{:.1}", ch.multiplier()))
                                     .color(GOOD),
                             );
                         }
                     });
                     if let Some(c) = &ch.active {
-                        let attack = c.title.starts_with("AANVAL");
+                        let attack = c.title.starts_with("AANVAL") || c.title.starts_with("ATTACK");
                         let accent = if attack {
                             BAD.gamma_multiply(0.75 + 0.25 * (t * 8.0).sin().abs())
                         } else {
@@ -358,8 +376,9 @@ fn draw_feedback(
                                 .fill(accent),
                         );
                         ui.label(
-                            egui::RichText::new(format!(
+                            egui::RichText::new(tf!(
                                 "nog {:.0} s · +{:.0} XP",
+                                "{:.0} s left · +{:.0} XP",
                                 c.time_left.max(0.0),
                                 c.xp as f32 * ch.multiplier()
                             ))
@@ -367,8 +386,9 @@ fn draw_feedback(
                         );
                     } else {
                         ui.label(
-                            egui::RichText::new(format!(
+                            egui::RichText::new(tf!(
                                 "Uitdagingen {}/{}",
+                                "Challenges {}/{}",
                                 ch.completed, ch.attempted
                             ))
                             .weak(),

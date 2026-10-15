@@ -15,6 +15,8 @@ use ridecore::trainer::{
 };
 
 use crate::{RaceRes, Screen};
+use ridecore::i18n::t;
+use ridecore::tf;
 
 /// Zwift sends simulation parameters at most every 0.75 s.
 const CONTROL_INTERVAL: Duration = Duration::from_millis(500);
@@ -143,7 +145,7 @@ impl Plugin for LinkPlugin {
             events: rx,
             commands,
             live: LiveData::default(),
-            status: "Bluetooth starten…".into(),
+            status: t("Bluetooth starten…", "Starting Bluetooth…").into(),
             name: None,
             controller: TrainerController::new(ControlTuning::default()),
             last_control: Instant::now(),
@@ -220,7 +222,7 @@ fn poll_trainer(
         match &ev {
             TrainerEvent::Status(s) => t.status = s.clone(),
             TrainerEvent::Connected(name) => {
-                t.status = format!("Verbonden met {name}");
+                t.status = tf!("Verbonden met {name}", "Connected to {name}");
                 t.name = Some(name.clone());
             }
             TrainerEvent::NativeShifting(on) => {
@@ -230,7 +232,10 @@ fn poll_trainer(
                 // on virtual gears (the Cog is a single speed).
                 if *on {
                     if let Some(name) = &t.name {
-                        t.status = format!("Verbonden met {name} · schakelt zelf (Zwift-protocol)");
+                        t.status = tf!(
+                            "Verbonden met {name} · schakelt zelf (Zwift-protocol)",
+                            "Connected to {name} · shifts itself (Zwift protocol)"
+                        );
                     }
                     settings.virtual_shifting = true;
                     if t.controller.gears.is_none() && session.as_ref().is_none_or(|s| s.game.is_some()) {
@@ -242,10 +247,17 @@ fn poll_trainer(
                 t.name = None;
                 t.native_shifting = false;
                 t.controller.native_gears = false;
-                t.status = "Trainer losgekoppeld, opnieuw verbinden…".into();
+                t.status = ridecore::i18n::t(
+                    "Trainer losgekoppeld, opnieuw verbinden…",
+                    "Trainer disconnected, reconnecting…",
+                )
+                .into();
             }
             TrainerEvent::CommandFailed(op, code) => {
-                t.status = format!("Trainer weigerde commando 0x{op:02X}: {code:?}");
+                t.status = tf!(
+                    "Trainer weigerde commando 0x{op:02X}: {code:?}",
+                    "Trainer refused command 0x{op:02X}: {code:?}"
+                );
             }
             TrainerEvent::ControllerConnected(name) => {
                 t.shifter = Some(name.clone());
@@ -262,7 +274,10 @@ fn poll_trainer(
             TrainerEvent::ControllerBattery(b) => t.shifter_battery = Some(*b),
             TrainerEvent::Shift(dir) => t.shift(*dir),
             TrainerEvent::ControllerButton(id) => {
-                t.status = format!("Onbekende knop op je controller (0x{id:X})");
+                t.status = tf!(
+                    "Onbekende knop op je controller (0x{id:X})",
+                    "Unknown button on your controller (0x{id:X})"
+                );
             }
             _ => {}
         }

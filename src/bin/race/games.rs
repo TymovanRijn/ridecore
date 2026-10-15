@@ -11,6 +11,8 @@
 use bevy_egui::egui::{self, Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 
 use crate::theme::{ACCENT, GOOD, MUTED, TEXT, WARN, display};
+use ridecore::i18n::t;
+use ridecore::tf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameKind {
@@ -24,23 +26,26 @@ impl GameKind {
 
     pub fn name(self) -> &'static str {
         match self {
-            GameKind::Balloon => "Ballonvaart",
-            GameKind::Pizza => "Pizzabakker",
-            GameKind::Fishing => "Vissen",
+            GameKind::Balloon => t("Ballonvaart", "Balloon ride"),
+            GameKind::Pizza => t("Pizzabakker", "Pizza baker"),
+            GameKind::Fishing => t("Vissen", "Fishing"),
         }
     }
 
     pub fn blurb(self) -> &'static str {
         match self {
-            GameKind::Balloon => {
-                "Je vermogen is je hoogte. Blijf in de luchtgang en pak de munten."
-            }
-            GameKind::Pizza => {
-                "Je vermogen is het vuur. Elke ronde een pizza: niet rauw, niet aangebrand."
-            }
-            GameKind::Fishing => {
-                "Je vermogen is de spanning op de lijn. Te slap en de vis zwemt weg."
-            }
+            GameKind::Balloon => t(
+                "Je vermogen is je hoogte. Blijf in de luchtgang en pak de munten.",
+                "Your power is your altitude. Stay in the corridor and grab the coins.",
+            ),
+            GameKind::Pizza => t(
+                "Je vermogen is het vuur. Elke ronde een pizza: niet rauw, niet aangebrand.",
+                "Your power is the fire. Every round is a pizza: not raw, not burnt.",
+            ),
+            GameKind::Fishing => t(
+                "Je vermogen is de spanning op de lijn. Te slap en de vis zwemt weg.",
+                "Your power is the tension on the line. Too slack and the fish swims off.",
+            ),
         }
     }
 
@@ -55,9 +60,9 @@ impl GameKind {
 
     fn score_label(self) -> &'static str {
         match self {
-            GameKind::Balloon => "munten",
-            GameKind::Pizza => "pizza's",
-            GameKind::Fishing => "vissen",
+            GameKind::Balloon => t("munten", "coins"),
+            GameKind::Pizza => t("pizza's", "pizzas"),
+            GameKind::Fishing => t("vissen", "fish"),
         }
     }
 }
@@ -79,7 +84,19 @@ fn needed(len: f32) -> f32 {
     if len < 30.0 { 0.55 } else { 0.7 }
 }
 
-const FISH: [&str; 6] = ["Voorn", "Baars", "Brasem", "Karper", "Snoek", "Meerval"];
+const FISH: [(&str, &str); 6] = [
+    ("Voorn", "Roach"),
+    ("Baars", "Perch"),
+    ("Brasem", "Bream"),
+    ("Karper", "Carp"),
+    ("Snoek", "Pike"),
+    ("Meerval", "Catfish"),
+];
+
+fn fish_name(i: usize) -> &'static str {
+    let (nl, en) = FISH[i];
+    t(nl, en)
+}
 const PIZZAS: [&str; 6] = [
     "Margherita",
     "Pepperoni",
@@ -193,17 +210,20 @@ impl Game {
 
     pub fn summary(&self) -> String {
         match self.kind {
-            GameKind::Balloon => format!(
+            GameKind::Balloon => tf!(
                 "{} munten · langste reeks {}",
+                "{} coins · longest streak {}",
                 self.score, self.best_streak
             ),
-            GameKind::Pizza => format!(
+            GameKind::Pizza => tf!(
                 "{} van {} pizza's geserveerd",
+                "{} of {} pizzas served",
                 self.rounds_won,
                 self.shelf.len()
             ),
-            GameKind::Fishing => format!(
+            GameKind::Fishing => tf!(
                 "{} van {} vissen gevangen",
+                "{} of {} fish caught",
                 self.rounds_won,
                 self.shelf.len()
             ),
@@ -307,9 +327,9 @@ impl Game {
         let variety = self.shelf.len() * 7 % 6;
         let pct = (share * 100.0).round();
         let hint = if self.over > self.under {
-            "Te veel vermogen: schakel lichter"
+            t("Te veel vermogen: schakel lichter", "Too much power: shift easier")
         } else {
-            "Te weinig vermogen: schakel zwaarder"
+            t("Te weinig vermogen: schakel zwaarder", "Too little power: shift harder")
         };
         let (title, sub) = match (self.kind, won) {
             (GameKind::Balloon, true) => {
@@ -320,35 +340,50 @@ impl Game {
                     .filter(|c| matches!(c, Coin::Got(_)))
                     .count();
                 (
-                    "Mooi gevlogen!".to_string(),
-                    format!("{got} munten in deze ronde · {pct:.0}% in de luchtgang"),
+                    t("Mooi gevlogen!", "Nice flying!").to_string(),
+                    tf!(
+                        "{got} munten in deze ronde · {pct:.0}% in de luchtgang",
+                        "{got} coins this round · {pct:.0}% in the corridor"
+                    ),
                 )
             }
-            (GameKind::Balloon, false) => ("Uit koers geraakt".into(), hint.to_string()),
+            (GameKind::Balloon, false) => (t("Uit koers geraakt", "Blown off course").into(), hint.to_string()),
             (GameKind::Pizza, true) => (
                 if share > 0.9 {
-                    format!("{} perfect!", PIZZAS[variety])
+                    tf!("{} perfect!", "{} perfect!", PIZZAS[variety])
                 } else {
-                    format!("{} is klaar!", PIZZAS[variety])
+                    tf!("{} is klaar!", "{} is ready!", PIZZAS[variety])
                 },
-                format!("{pct:.0}% op de juiste temperatuur"),
+                tf!("{pct:.0}% op de juiste temperatuur", "{pct:.0}% at the right temperature"),
             ),
             (GameKind::Pizza, false) if burnt => (
-                "Aangebrand!".into(),
-                "Te heet: schakel lichter of trap rustiger".into(),
+                t("Aangebrand!", "Burnt!").into(),
+                t(
+                    "Te heet: schakel lichter of trap rustiger",
+                    "Too hot: shift easier or pedal softer",
+                )
+                .into(),
             ),
             (GameKind::Pizza, false) => (
-                "Half rauw…".into(),
-                "Te koud: schakel zwaarder of trap sneller".into(),
+                t("Half rauw…", "Half raw…").into(),
+                t(
+                    "Te koud: schakel zwaarder of trap sneller",
+                    "Too cold: shift harder or pedal faster",
+                )
+                .into(),
             ),
             (GameKind::Fishing, true) => {
                 let fish = fish_of(len, variety);
                 (
-                    format!("{} gevangen!", FISH[fish]),
-                    format!("{} cm · {pct:.0}% strak aan de lijn", fish_cm(len, variety)),
+                    tf!("{} gevangen!", "{} caught!", fish_name(fish)),
+                    tf!(
+                        "{} cm · {pct:.0}% strak aan de lijn",
+                        "{} cm · {pct:.0}% tight on the line",
+                        fish_cm(len, variety)
+                    ),
                 )
             }
-            (GameKind::Fishing, false) => ("Ontsnapt!".into(), hint.to_string()),
+            (GameKind::Fishing, false) => (t("Ontsnapt!", "Got away!").into(), hint.to_string()),
         };
         if won {
             self.rounds_won += 1;
@@ -403,18 +438,23 @@ impl Game {
                 );
             });
             let line = match self.kind {
-                GameKind::Balloon => format!(
+                GameKind::Balloon => tf!(
                     "reeks {} · beste {}",
+                    "streak {} · best {}",
                     self.streak, self.best_streak
                 ),
                 _ => {
                     let lost = self.shelf.len() as u32 - self.rounds_won;
                     let word = if self.kind == GameKind::Pizza {
-                        "mislukt"
+                        t("mislukt", "failed")
                     } else {
-                        "ontsnapt"
+                        t("ontsnapt", "got away")
                     };
-                    format!("{lost} {word} · ronde {}", (self.round + 1).min(self.rounds.len()))
+                    tf!(
+                        "{lost} {word} · ronde {}",
+                        "{lost} {word} · round {}",
+                        (self.round + 1).min(self.rounds.len())
+                    )
                 }
             };
             ui.label(egui::RichText::new(line).color(MUTED));
@@ -621,9 +661,9 @@ impl Game {
                 ));
             }
             let hint = if self.power > t + b {
-                Some(("Lager! Minder vermogen", WARN))
+                Some((ridecore::i18n::t("Lager! Minder vermogen", "Lower! Less power"), WARN))
             } else if self.power < t - b {
-                Some(("Hoger! Meer vermogen", WARN))
+                Some((ridecore::i18n::t("Hoger! Meer vermogen", "Higher! More power"), WARN))
             } else {
                 None
             };
@@ -752,11 +792,11 @@ impl Game {
             TEXT,
         );
         let label = if (heat - 1.0).abs() <= tol {
-            "Perfect vuur"
+            t("Perfect vuur", "Perfect fire")
         } else if heat > 1.0 {
-            "Te heet!"
+            t("Te heet!", "Too hot!")
         } else {
-            "Te koud"
+            t("Te koud", "Too cold")
         };
         p.text(
             pos2(tube.left() - 12.0, y_of(heat)),
@@ -772,7 +812,7 @@ impl Game {
         p.text(
             ticket.left_top() + vec2(14.0, 12.0),
             egui::Align2::LEFT_TOP,
-            format!("Bestelling #{}", round + 1),
+            tf!("Bestelling #{}", "Order #{}", round + 1),
             display(20.0),
             Color32::from_rgb(60, 40, 30),
         );
@@ -793,7 +833,7 @@ impl Game {
         p.text(
             ticket.left_top() + vec2(14.0, 100.0),
             egui::Align2::LEFT_TOP,
-            format!("gaar: {:.0}%", done / needed(len) * 100.0),
+            tf!("gaar: {:.0}%", "done: {:.0}%", done / needed(len) * 100.0),
             egui::FontId::proportional(13.0),
             Color32::from_rgb(90, 70, 60),
         );
@@ -951,17 +991,17 @@ impl Game {
         p.line_segment([g, g + vec2(a.cos(), -a.sin()) * (rad - 6.0)], Stroke::new(4.0, TEXT));
         p.circle_filled(g, 6.0, TEXT);
         let word = if (tension - 1.0).abs() <= tol {
-            "Strak!"
+            t("Strak!", "Tight!")
         } else if tension > 1.0 {
-            "Lijn kraakt!"
+            t("Lijn kraakt!", "Line's creaking!")
         } else {
-            "Te slap"
+            t("Te slap", "Too slack")
         };
         p.text(g + vec2(0.0, 26.0), egui::Align2::CENTER_CENTER, word, display(24.0), line_color);
         p.text(
             g + vec2(0.0, 52.0),
             egui::Align2::CENTER_CENTER,
-            format!("{} · nog {:.0} m", FISH[kind], self.reel * 30.0),
+            tf!("{} · nog {:.0} m", "{} · {:.0} m to go", fish_name(kind), self.reel * 30.0),
             egui::FontId::proportional(15.0),
             TEXT,
         );

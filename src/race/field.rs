@@ -2,6 +2,7 @@
 //! spread), and riders of different types sampled from that strength.
 
 use crate::physics::{BikeParams, CD, frontal_area_m2};
+use crate::i18n::t;
 use crate::rng::Rng;
 
 use super::energy::Energy;
@@ -18,9 +19,9 @@ impl RiderKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Sprinter => "Sprinter",
-            Self::Climber => "Klimmer",
+            Self::Climber => t("Klimmer", "Climber"),
             Self::Rouleur => "Rouleur",
-            Self::Domestique => "Knecht",
+            Self::Domestique => t("Knecht", "Domestique"),
         }
     }
 }

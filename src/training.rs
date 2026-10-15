@@ -3,6 +3,7 @@
 //! ridden session is scored. The trainer holds each target in ERG mode, so
 //! the rider only has to keep pedalling.
 
+use crate::i18n::t;
 use crate::workout::{Segment, Workout};
 
 /// Power zones as fractions of FTP (Coggan, with sweet spot split out).
@@ -42,13 +43,13 @@ impl Zone {
 
     pub fn label(self) -> &'static str {
         match self {
-            Zone::Recovery => "Herstel",
-            Zone::Endurance => "Duur",
+            Zone::Recovery => t("Herstel", "Recovery"),
+            Zone::Endurance => t("Duur", "Endurance"),
             Zone::Tempo => "Tempo",
             Zone::SweetSpot => "Sweet spot",
-            Zone::Threshold => "Drempel",
+            Zone::Threshold => t("Drempel", "Threshold"),
             Zone::Vo2max => "VO2max",
-            Zone::Anaerobic => "Anaeroob",
+            Zone::Anaerobic => t("Anaeroob", "Anaerobic"),
         }
     }
 
@@ -88,8 +89,8 @@ impl Focus {
             Focus::Vo2max => "VO2max",
             Focus::Threshold => "FTP",
             Focus::SweetSpot => "Sweet spot",
-            Focus::Endurance => "Basis",
-            Focus::Recovery => "Herstel",
+            Focus::Endurance => t("Basis", "Base"),
+            Focus::Recovery => t("Herstel", "Recovery"),
             Focus::Test => "Test",
         }
     }
@@ -230,15 +231,23 @@ const WARM_UP: usize = 6;
 /// in fixed watts.
 pub fn library(ftp: f32) -> Vec<Plan> {
     let ftp = ftp.max(80.0);
-    vec![
+    let mut plans = vec![
         Plan {
             id: "kennismaking",
-            name: "Kennismaking",
+            name: t("Kennismaking", "First ride"),
             focus: Focus::Endurance,
-            summary: "20 min: voel hoe ERG werkt, met drie korte versnellingen",
-            why: "Een rustige eerste rit. De trainer zet zelf de weerstand: jij trapt \
-                  gewoon door, harder of zachter trappen verandert je vermogen niet. \
-                  Probeer tijdens de versnellingen eens een hogere cadans.",
+            summary: t(
+                "20 min: voel hoe ERG werkt, met drie korte versnellingen",
+                "20 min: feel how ERG works, with three short efforts",
+            ),
+            why: t(
+                "Een rustige eerste rit. De trainer zet zelf de weerstand: jij trapt \
+                 gewoon door, harder of zachter trappen verandert je vermogen niet. \
+                 Probeer tijdens de versnellingen eens een hogere cadans.",
+                "An easy first ride. The trainer sets the resistance itself: you just \
+                 keep pedalling, and pedalling harder or softer doesn't change your \
+                 power. Try a higher cadence during the efforts.",
+            ),
             source: "",
             workout: Build::new()
                 .ramp(5.0, 0.45, 0.65)
@@ -254,12 +263,21 @@ pub fn library(ftp: f32) -> Vec<Plan> {
             id: "ronnestad-30-15",
             name: "Rønnestad 30/15",
             focus: Focus::Vo2max,
-            summary: "3 × 13 × (30 s hard / 15 s rustig) — de VO2max-kraker",
-            why: "Korte blokken met nog kortere rust houden je zuurstofopname lang \
-                  dicht bij het maximum, langer dan bij lange intervallen. In de studie \
-                  van Rønnestad gingen wielrenners die dit drie keer per week deden er \
-                  in tien weken duidelijk meer op vooruit (VO2max en vermogen) dan met \
-                  4 × 5 minuten.",
+            summary: t(
+                "3 × 13 × (30 s hard / 15 s rustig) — de VO2max-kraker",
+                "3 × 13 × (30 s hard / 15 s easy) — the VO2max cracker",
+            ),
+            why: t(
+                "Korte blokken met nog kortere rust houden je zuurstofopname lang \
+                 dicht bij het maximum, langer dan bij lange intervallen. In de studie \
+                 van Rønnestad gingen wielrenners die dit drie keer per week deden er \
+                 in tien weken duidelijk meer op vooruit (VO2max en vermogen) dan met \
+                 4 × 5 minuten.",
+                "Short blocks with even shorter rests keep your oxygen uptake close \
+                 to its maximum for longer than long intervals do. In Rønnestad's \
+                 study, cyclists who did this three times a week improved clearly \
+                 more in ten weeks (VO2max and power) than with 4 × 5 minutes.",
+            ),
             source: "Rønnestad et al., Scand J Med Sci Sports 2015 & 2020",
             workout: {
                 let mut b = Build::new().warm_up();
@@ -278,11 +296,19 @@ pub fn library(ftp: f32) -> Vec<Plan> {
             id: "seiler-4x8",
             name: "Seiler 4 × 8",
             focus: Focus::Vo2max,
-            summary: "4 × 8 min net boven je FTP, 2 min rust",
-            why: "Seiler liet goed getrainde sporters 4 × 4, 4 × 8 en 4 × 16 minuten \
-                  rijden. De groep met 4 × 8 minuten op een pittig maar vol te houden \
-                  tempo won het meest. Lang genoeg om je hart en longen te prikkelen, \
-                  kort genoeg om het vol te houden.",
+            summary: t(
+                "4 × 8 min net boven je FTP, 2 min rust",
+                "4 × 8 min just above your FTP, 2 min rest",
+            ),
+            why: t(
+                "Seiler liet goed getrainde sporters 4 × 4, 4 × 8 en 4 × 16 minuten \
+                 rijden. De groep met 4 × 8 minuten op een pittig maar vol te houden \
+                 tempo won het meest. Lang genoeg om je hart en longen te prikkelen, \
+                 kort genoeg om het vol te houden.",
+                "Seiler had well-trained athletes ride 4 × 4, 4 × 8 and 4 × 16 minutes. \
+                 The 4 × 8 minute group, at a hard but sustainable pace, gained the \
+                 most. Long enough to push your heart and lungs, short enough to hold.",
+            ),
             source: "Seiler et al., Scand J Med Sci Sports 2013",
             workout: Build::new()
                 .warm_up()
@@ -294,12 +320,20 @@ pub fn library(ftp: f32) -> Vec<Plan> {
         },
         Plan {
             id: "helgerud-4x4",
-            name: "Noorse 4 × 4",
+            name: t("Noorse 4 × 4", "Norwegian 4 × 4"),
             focus: Focus::Vo2max,
-            summary: "4 × 4 min diep, 3 min actieve rust",
-            why: "De klassieker uit Noorwegen: vier blokken van vier minuten op \
-                  90–95% van je maximale hartslag. Je hartslagvolume groeit en je \
-                  VO2max stijgt snel, ook als je al fit bent.",
+            summary: t(
+                "4 × 4 min diep, 3 min actieve rust",
+                "4 × 4 min deep, 3 min active rest",
+            ),
+            why: t(
+                "De klassieker uit Noorwegen: vier blokken van vier minuten op \
+                 90–95% van je maximale hartslag. Je hartslagvolume groeit en je \
+                 VO2max stijgt snel, ook als je al fit bent.",
+                "The Norwegian classic: four blocks of four minutes at 90–95% of \
+                 your maximum heart rate. Your stroke volume grows and your VO2max \
+                 rises quickly, even if you're already fit.",
+            ),
             source: "Helgerud et al., Med Sci Sports Exerc 2007",
             workout: Build::new()
                 .warm_up()
@@ -313,11 +347,22 @@ pub fn library(ftp: f32) -> Vec<Plan> {
             id: "40-20",
             name: "40/20's",
             focus: Focus::Vo2max,
-            summary: "2 × 10 × (40 s / 20 s) — kort, fel en verslavend",
-            why: "Net als 30/15 een manier om lang rond je VO2max te zitten zonder \
-                  dat het één groot gevecht wordt. De korte rust houdt de inspanning \
-                  hoog; dit is ook precies hoe aanvallen in een koers voelen.",
-            source: "Gebaseerd op Billat (30-30) en Rønnestad",
+            summary: t(
+                "2 × 10 × (40 s / 20 s) — kort, fel en verslavend",
+                "2 × 10 × (40 s / 20 s) — short, sharp and addictive",
+            ),
+            why: t(
+                "Net als 30/15 een manier om lang rond je VO2max te zitten zonder \
+                 dat het één groot gevecht wordt. De korte rust houdt de inspanning \
+                 hoog; dit is ook precies hoe aanvallen in een koers voelen.",
+                "Like 30/15, a way to spend a long time near your VO2max without it \
+                 turning into one big fight. The short rests keep the effort high; \
+                 this is also exactly how attacks in a race feel.",
+            ),
+            source: t(
+                "Gebaseerd op Billat (30-30) en Rønnestad",
+                "Based on Billat (30-30) and Rønnestad",
+            ),
             workout: Build::new()
                 .warm_up()
                 .reps(10, (40, 1.2), (20, 0.5), Some(100))
@@ -332,10 +377,18 @@ pub fn library(ftp: f32) -> Vec<Plan> {
             id: "sweetspot-3x12",
             name: "Sweet spot 3 × 12",
             focus: Focus::SweetSpot,
-            summary: "3 × 12 min op 90% FTP: veel winst, weinig vermoeidheid",
-            why: "Net onder je drempel (88–94% FTP) bouw je veel trainingsprikkel op \
-                  voor relatief weinig vermoeidheid. Ideaal om je FTP op te krikken \
-                  als je maar een paar uur per week hebt.",
+            summary: t(
+                "3 × 12 min op 90% FTP: veel winst, weinig vermoeidheid",
+                "3 × 12 min at 90% FTP: big gains, little fatigue",
+            ),
+            why: t(
+                "Net onder je drempel (88–94% FTP) bouw je veel trainingsprikkel op \
+                 voor relatief weinig vermoeidheid. Ideaal om je FTP op te krikken \
+                 als je maar een paar uur per week hebt.",
+                "Just below your threshold (88–94% FTP) you build a lot of training \
+                 stimulus for relatively little fatigue. Ideal for raising your FTP \
+                 when you only have a few hours a week.",
+            ),
             source: "Coggan & Allen, Training and Racing with a Power Meter",
             workout: Build::new()
                 .warm_up()
@@ -347,14 +400,25 @@ pub fn library(ftp: f32) -> Vec<Plan> {
         },
         Plan {
             id: "threshold-2x20",
-            name: "Drempel 2 × 20",
+            name: t("Drempel 2 × 20", "Threshold 2 × 20"),
             focus: Focus::Threshold,
-            summary: "2 × 20 min op 95–100% FTP: de FTP-klassieker",
-            why: "Lang op je drempel rijden leert je lichaam om melkzuur sneller op \
-                  te ruimen. Twee keer twintig minuten is zwaar maar haalbaar, en het \
-                  is de training die het meest lijkt op een lange klim of een \
-                  tijdrit.",
-            source: "Coggan & Allen; Hunter Allen's FTP-protocol",
+            summary: t(
+                "2 × 20 min op 95–100% FTP: de FTP-klassieker",
+                "2 × 20 min at 95–100% FTP: the FTP classic",
+            ),
+            why: t(
+                "Lang op je drempel rijden leert je lichaam om melkzuur sneller op \
+                 te ruimen. Twee keer twintig minuten is zwaar maar haalbaar, en het \
+                 is de training die het meest lijkt op een lange klim of een \
+                 tijdrit.",
+                "Riding at threshold for a long time teaches your body to clear \
+                 lactate faster. Two times twenty minutes is hard but doable, and \
+                 it's the workout that feels most like a long climb or a time trial.",
+            ),
+            source: t(
+                "Coggan & Allen; Hunter Allen's FTP-protocol",
+                "Coggan & Allen; Hunter Allen's FTP protocol",
+            ),
             workout: Build::new()
                 .warm_up()
                 .steady(1200, 0.96, Some(90))
@@ -369,12 +433,23 @@ pub fn library(ftp: f32) -> Vec<Plan> {
             id: "over-unders",
             name: "Over-unders",
             focus: Focus::Threshold,
-            summary: "3 × 9 min wisselend net onder en net boven je drempel",
-            why: "Afwisselend 95% en 108% van je FTP: boven je drempel maak je \
-                  melkzuur aan, net eronder leer je het weer kwijt te raken terwijl \
-                  je doorrijdt. Precies wat je nodig hebt als het tempo in een koers \
-                  steeds wordt opgeschroefd.",
-            source: "Gebruikelijk protocol bij Carmichael Training Systems",
+            summary: t(
+                "3 × 9 min wisselend net onder en net boven je drempel",
+                "3 × 9 min switching just below and just above threshold",
+            ),
+            why: t(
+                "Afwisselend 95% en 108% van je FTP: boven je drempel maak je \
+                 melkzuur aan, net eronder leer je het weer kwijt te raken terwijl \
+                 je doorrijdt. Precies wat je nodig hebt als het tempo in een koers \
+                 steeds wordt opgeschroefd.",
+                "Alternating 95% and 108% of your FTP: above threshold you build up \
+                 lactate, just below it you learn to clear it while you keep riding. \
+                 Exactly what you need when the pace in a race keeps going up.",
+            ),
+            source: t(
+                "Gebruikelijk protocol bij Carmichael Training Systems",
+                "A common protocol at Carmichael Training Systems",
+            ),
             workout: {
                 let mut b = Build::new().warm_up();
                 for set in 0..3 {
@@ -392,12 +467,20 @@ pub fn library(ftp: f32) -> Vec<Plan> {
         },
         Plan {
             id: "zone2-60",
-            name: "Duurrit Zone 2",
+            name: t("Duurrit Zone 2", "Zone 2 endurance"),
             focus: Focus::Endurance,
-            summary: "60 min rustig duurvermogen: de basis onder alles",
-            why: "Topsporters rijden zo'n 80% van hun tijd rustig. In zone 2 groeien \
-                  je mitochondriën en haarvaten, en verbrand je meer vet, zonder dat \
-                  je moe wordt voor de zware dagen.",
+            summary: t(
+                "60 min rustig duurvermogen: de basis onder alles",
+                "60 min of easy endurance: the base under everything",
+            ),
+            why: t(
+                "Topsporters rijden zo'n 80% van hun tijd rustig. In zone 2 groeien \
+                 je mitochondriën en haarvaten, en verbrand je meer vet, zonder dat \
+                 je moe wordt voor de zware dagen.",
+                "Top athletes ride about 80% of their time easy. In zone 2 your \
+                 mitochondria and capillaries grow and you burn more fat, without \
+                 getting tired for the hard days.",
+            ),
             source: "Seiler, 'polarised training'; Stöggl & Sperlich 2014",
             workout: Build::new()
                 .ramp(8.0, 0.45, 0.68)
@@ -413,12 +496,16 @@ pub fn library(ftp: f32) -> Vec<Plan> {
         },
         Plan {
             id: "recovery-30",
-            name: "Hersteltraining",
+            name: t("Hersteltraining", "Recovery ride"),
             focus: Focus::Recovery,
-            summary: "30 min heel rustig losrijden",
-            why: "Na een zware dag of een koers helpt rustig doortrappen je benen \
-                  sneller te herstellen dan stilzitten. Het mag echt makkelijk \
-                  voelen.",
+            summary: t("30 min heel rustig losrijden", "30 min of very easy spinning"),
+            why: t(
+                "Na een zware dag of een koers helpt rustig doortrappen je benen \
+                 sneller te herstellen dan stilzitten. Het mag echt makkelijk \
+                 voelen.",
+                "After a hard day or a race, easy pedalling helps your legs recover \
+                 faster than sitting still. It should feel really easy.",
+            ),
             source: "",
             workout: Build::new()
                 .ramp(5.0, 0.4, 0.5)
@@ -430,14 +517,26 @@ pub fn library(ftp: f32) -> Vec<Plan> {
         },
         Plan {
             id: "ramp-test",
-            name: "Ramptest",
+            name: t("Ramptest", "Ramp test"),
             focus: Focus::Test,
-            summary: "Elke minuut 20 W zwaarder, tot je niet meer kan",
-            why: "De snelste manier om je FTP te meten. Na een korte warming-up gaat \
-                  het vermogen elke minuut 20 W omhoog. Houd vol zolang het lukt; je \
-                  FTP is ongeveer 75% van je beste minuut. Daarna rekent RideCore \
-                  overal met je nieuwe FTP.",
-            source: "Ramptest-protocol zoals gebruikt door Zwift en TrainerRoad",
+            summary: t(
+                "Elke minuut 20 W zwaarder, tot je niet meer kan",
+                "20 W harder every minute, until you can't go on",
+            ),
+            why: t(
+                "De snelste manier om je FTP te meten. Na een korte warming-up gaat \
+                 het vermogen elke minuut 20 W omhoog. Houd vol zolang het lukt; je \
+                 FTP is ongeveer 75% van je beste minuut. Daarna rekent RideCore \
+                 overal met je nieuwe FTP.",
+                "The quickest way to measure your FTP. After a short warm-up the \
+                 power goes up 20 W every minute. Hold on as long as you can; your \
+                 FTP is about 75% of your best minute. After that RideCore uses your \
+                 new FTP everywhere.",
+            ),
+            source: t(
+                "Ramptest-protocol zoals gebruikt door Zwift en TrainerRoad",
+                "Ramp test protocol as used by Zwift and TrainerRoad",
+            ),
             workout: {
                 let mut b = Build::new().ramp(5.0, 0.4, 0.55).steady(60, 0.55, None);
                 let start = 100.0_f32.max(ftp * 0.4).round();
@@ -453,7 +552,12 @@ pub fn library(ftp: f32) -> Vec<Plan> {
             warmup: 0,
             ramp_test: true,
         },
-    ]
+    ];
+    // The recorded workout carries the name in the current language.
+    for p in &mut plans {
+        p.workout.name = p.name.into();
+    }
+    plans
 }
 
 /// FTP from a ramp test: 75% of the best one-minute power.

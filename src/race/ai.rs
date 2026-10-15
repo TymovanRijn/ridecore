@@ -6,7 +6,9 @@ use super::course::SegmentKind;
 use super::field::RiderKind;
 use super::{Race, Rider, TeamOrder};
 use crate::race::course::Course;
+use crate::i18n::t;
 use crate::rng::Rng;
+use crate::tf;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Intent {
@@ -49,15 +51,15 @@ pub enum Intent {
 impl Intent {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Sit => "in het wiel",
-            Self::Pull { .. } => "kopwerk",
-            Self::Attack { .. } => "valt aan",
-            Self::Break => "in de vlucht",
+            Self::Sit => t("in het wiel", "on a wheel"),
+            Self::Pull { .. } => t("kopwerk", "pulling"),
+            Self::Attack { .. } => t("valt aan", "attacking"),
+            Self::Break => t("in de vlucht", "in the break"),
             Self::Sprint { .. } => "sprint",
-            Self::Escort { .. } => "beschermt",
-            Self::Wait { .. } => "wacht",
-            Self::Mark { .. } => "springt mee",
-            Self::Finished => "binnen",
+            Self::Escort { .. } => t("beschermt", "protecting"),
+            Self::Wait { .. } => t("wacht", "waiting"),
+            Self::Mark { .. } => t("springt mee", "following"),
+            Self::Finished => t("binnen", "finished"),
         }
     }
 }
@@ -84,8 +86,8 @@ impl Plan {
     pub fn label(self) -> &'static str {
         match self {
             Self::Sprint => "sprint",
-            Self::Climb => "klimmen",
-            Self::Break => "vluchten",
+            Self::Climb => t("klimmen", "climb"),
+            Self::Break => t("vluchten", "breakaway"),
         }
     }
 }
@@ -255,7 +257,7 @@ fn note_catches(race: &mut Race, sit: &Situation) {
     let break_up = sit.peloton > 0 && race.groups.first().is_some_and(|g| g.riders.len() < 12);
     if race.break_up && !break_up && race.started() {
         race.last_catch = race.time;
-        race.log("De vlucht is ingelopen!".into());
+        race.log(t("De vlucht is ingelopen!", "The break has been caught!").into());
     }
     race.break_up = break_up;
 }
@@ -421,8 +423,9 @@ fn direct_team(race: &mut Race, t: usize, sit: &Situation) {
                 until,
             },
         ));
-        let text = format!(
+        let text = tf!(
             "{} ({}) probeert mee te springen",
+            "{} ({}) tries to bridge across",
             race.riders[i].profile.name, team.spec.name
         );
         race.log(text);
@@ -462,7 +465,11 @@ fn direct_team(race: &mut Race, t: usize, sit: &Situation) {
                     intensity: 1.25,
                     until,
                 };
-                let text = format!("{name} ({}) demarreert op de klim!", team.spec.name);
+                let text = tf!(
+                    "{name} ({}) demarreert op de klim!",
+                    "{name} ({}) attacks on the climb!",
+                    team.spec.name
+                );
                 race.log(text);
                 mark_attack(race, leader, sit, until);
             }
@@ -484,8 +491,9 @@ fn direct_team(race: &mut Race, t: usize, sit: &Situation) {
                 intensity: 1.3,
                 until,
             };
-            race.log(format!(
+            race.log(tf!(
                 "{name} ({}) gaat op de laatste klim!",
+                "{name} ({}) goes on the last climb!",
                 team.spec.name
             ));
             mark_attack(race, leader, sit, until);
@@ -679,7 +687,10 @@ fn attacks(race: &mut Race, sit: &Situation) {
         race.riders[i].intent = Intent::Attack { intensity, until };
         let name = race.riders[i].profile.name.clone();
         let team_name = race.teams[race.riders[i].team].spec.name.clone();
-        race.log(format!("Aanval van {name} ({team_name})!"));
+        race.log(tf!(
+            "Aanval van {name} ({team_name})!",
+            "Attack by {name} ({team_name})!"
+        ));
 
         // Riders of the same calibre jump on it.
         mark_attack(race, i, sit, until);
@@ -731,11 +742,15 @@ fn mark_attack(race: &mut Race, attacker: usize, sit: &Situation, until: f32) {
     }
     if !names.is_empty() {
         let verb = if names.len() > 1 {
-            "springen"
+            t("springen", "go")
         } else {
-            "springt"
+            t("springt", "goes")
         };
-        race.log(format!("{} {verb} mee!", names.join(" en ")));
+        race.log(tf!(
+            "{} {verb} mee!",
+            "{} {verb} with it!",
+            names.join(t(" en ", " and "))
+        ));
     }
 }
 

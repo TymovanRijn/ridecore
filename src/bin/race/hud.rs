@@ -4,7 +4,9 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
+use ridecore::i18n::t;
 use ridecore::race::ai::Intent;
+use ridecore::tf;
 use ridecore::race::course::SegmentKind;
 use ridecore::race::{Race, TeamOrder};
 
@@ -155,7 +157,7 @@ fn hud(
                     if let Some(hr) = input.heart_rate {
                         big(
                             ui,
-                            "HART",
+                            t("HART", "HR"),
                             hr.to_string(),
                             egui::Color32::from_rgb(255, 90, 90),
                         );
@@ -187,11 +189,15 @@ fn hud(
                             } else {
                                 egui::Color32::GRAY
                             })
-                            .text(if sheltered { "In het wiel" } else { "Wind" }),
+                            .text(if sheltered {
+                                t("In het wiel", "Sheltered")
+                            } else {
+                                "Wind"
+                            }),
                     );
                     let road = race.course.smooth_grade_pct(me.dist);
                     ui.label(
-                        egui::RichText::new(format!("Helling {road:.1}%"))
+                        egui::RichText::new(tf!("Helling {road:.1}%", "Grade {road:.1}%"))
                             .color(egui::Color32::LIGHT_GRAY),
                     );
                     // Without virtual gears the trainer gives only part of
@@ -214,7 +220,7 @@ fn hud(
                         let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * since) as u8;
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new(format!("Versnelling {}", g.index + 1))
+                                egui::RichText::new(tf!("Versnelling {}", "Gear {}", g.index + 1))
                                     .size(size)
                                     .strong()
                                     .color(egui::Color32::from_rgb(255, 255, lerp(255, 0))),
@@ -236,7 +242,10 @@ fn hud(
                     }
                     if settings.keyboard {
                         ui.label(
-                            egui::RichText::new("Testmodus: pijl omhoog/omlaag")
+                            egui::RichText::new(t(
+                                "Testmodus: pijl omhoog/omlaag",
+                                "Test mode: arrow up/down",
+                            ))
                                 .color(egui::Color32::YELLOW),
                         );
                     }
@@ -252,20 +261,24 @@ fn hud(
                 ui.vertical_centered(|ui| {
                     if !race.started() {
                         ui.label(
-                            egui::RichText::new(format!("Start over {:.0}", -race.time))
+                            egui::RichText::new(tf!("Start over {:.0}", "Start in {:.0}", -race.time))
                                 .size(40.0)
                                 .strong()
                                 .color(ORANGE),
                         );
-                        ui.label("Klaar maken… begin te trappen bij 0!");
+                        ui.label(t(
+                            "Klaar maken… begin te trappen bij 0!",
+                            "Get ready… start pedalling at 0!",
+                        ));
                     } else {
                         let left = race.remaining_m(race.human) / 1000.0;
                         let lap_len = race.course.route.length_m();
                         let lap = ((me.dist.max(0.0) / lap_len) as u32 + 1).min(race.course.laps);
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new(format!(
+                                egui::RichText::new(tf!(
                                     "{}   ·   {:.1} km te gaan   ·   P{}",
+                                    "{}   ·   {:.1} km to go   ·   P{}",
                                     fmt_time(race.time),
                                     left,
                                     race.position(race.human)
@@ -291,15 +304,16 @@ fn hud(
                                 );
                             }
                         });
-                        let mut line = format!("Ronde {lap}/{}", race.course.laps);
+                        let mut line = tf!("Ronde {lap}/{}", "Lap {lap}/{}", race.course.laps);
                         if let Some(seg) = race.course.next_segment(me.dist) {
                             let kind = if seg.kind == SegmentKind::Sprint {
                                 "Sprint"
                             } else {
                                 "KOM"
                             };
-                            line += &format!(
+                            line += &tf!(
                                 "   ·   {kind} over {:.1} km",
+                                "   ·   {kind} in {:.1} km",
                                 (seg.end_m - me.dist) / 1000.0
                             );
                         }
@@ -316,7 +330,7 @@ fn hud(
             panel().show(ui, |ui| {
                 ui.set_width(300.0);
                 ui.label(
-                    egui::RichText::new("Koerssituatie")
+                    egui::RichText::new(t("Koerssituatie", "Race situation"))
                         .strong()
                         .color(egui::Color32::WHITE),
                 );
@@ -327,12 +341,12 @@ fn hud(
                         "Peloton".to_string()
                     } else if gi < peloton {
                         if gi == 0 {
-                            "Kopgroep".into()
+                            t("Kopgroep", "Lead group").into()
                         } else {
-                            format!("Achtervolgers {gi}")
+                            tf!("Achtervolgers {gi}", "Chasers {gi}")
                         }
                     } else {
-                        format!("Groep {}", gi + 1)
+                        tf!("Groep {}", "Group {}", gi + 1)
                     };
                     let mates = g
                         .riders
@@ -344,7 +358,11 @@ fn hud(
                         text += &format!("  +{}", fmt_time(g.gap_s));
                     }
                     if mates > 0 {
-                        text += &format!("  · {mates} ploegmaat");
+                        text += &if mates == 1 {
+                            tf!("  · {mates} ploegmaat", "  · {mates} teammate")
+                        } else {
+                            tf!("  · {mates} ploegmaten", "  · {mates} teammates")
+                        };
                     }
                     let color = if gi == mine {
                         ORANGE
@@ -362,7 +380,7 @@ fn hud(
                 }
                 ui.separator();
                 ui.label(
-                    egui::RichText::new("Om je heen")
+                    egui::RichText::new(t("Om je heen", "Around you"))
                         .strong()
                         .color(egui::Color32::WHITE),
                 );
@@ -404,8 +422,9 @@ fn hud(
         .show(ctx, |ui| {
             panel().show(ui, |ui| {
                 ui.label(
-                    egui::RichText::new(format!(
+                    egui::RichText::new(tf!(
                         "Ploegorders · {} ({})",
+                        "Team orders · {} ({})",
                         race.player_team().spec.name,
                         race.player_team().plan.label()
                     ))
@@ -421,8 +440,9 @@ fn hud(
                     }
                 });
                 ui.label(
-                    egui::RichText::new(format!(
+                    egui::RichText::new(tf!(
                         "C camera ({}{})  ·  V auto aan/uit  ·  P pauze  ·  Esc menu",
+                        "C camera ({}{})  ·  V auto on/off  ·  P pause  ·  Esc menu",
                         rig.view.label(),
                         if rig.auto { " · auto" } else { "" }
                     ))
@@ -469,16 +489,16 @@ fn hud(
                 panel().show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.label(
-                            egui::RichText::new("Gepauzeerd")
+                            egui::RichText::new(t("Gepauzeerd", "Paused"))
                                 .size(32.0)
                                 .strong()
                                 .color(egui::Color32::WHITE),
                         );
-                        if ui.button("Hervatten").clicked() {
+                        if ui.button(t("Hervatten", "Resume")).clicked() {
                             menu.open = false;
                             res.paused = false;
                         }
-                        if menu.open && ui.button("Opgeven en terug naar het menu").clicked() {
+                        if menu.open && ui.button(t("Opgeven en terug naar het menu", "Quit and back to the menu")).clicked() {
                             menu.open = false;
                             next.set(Screen::Setup);
                         }

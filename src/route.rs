@@ -244,6 +244,10 @@ impl Route {
     pub fn catalog() -> Vec<Route> {
         let mut all = real_routes().to_vec();
         all.extend(Self::builtin());
+        for r in &mut all {
+            r.name = crate::i18n::place(&r.name);
+            r.region = crate::i18n::place(&r.region);
+        }
         all
     }
 
