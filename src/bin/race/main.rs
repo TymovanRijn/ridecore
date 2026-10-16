@@ -105,6 +105,9 @@ fn main() {
         )
         .add_systems(Update, screenshots)
         .add_systems(OnExit(Screen::Racing), save_unfinished)
+        .init_resource::<KeepAwake>()
+        .add_systems(OnEnter(Screen::Racing), stay_awake)
+        .add_systems(OnEnter(Screen::Setup), allow_sleep)
         // Not on the setup screen, where F is typed into text fields.
         .add_systems(
             Update,
@@ -163,6 +166,30 @@ pub fn advance_race(
 
 /// A race left before the finish is still saved (FIT and card), so every
 /// ride ends up in ~/Documents/RideCore. Workouts save themselves.
+/// While you ride, the Mac must not start the screen saver or dim the
+/// display: macOS then stops drawing the window and the ride freezes.
+/// `caffeinate -d` holds that off and quits by itself when RideCore does.
+#[derive(Resource, Default)]
+struct KeepAwake(Option<std::process::Child>);
+
+fn stay_awake(mut keep: ResMut<KeepAwake>) {
+    if keep.0.is_some() {
+        return;
+    }
+    keep.0 = std::process::Command::new("caffeinate")
+        .args(["-d", "-i", "-w", &std::process::id().to_string()])
+        .spawn()
+        .map_err(|e| eprintln!("caffeinate not started: {e}"))
+        .ok();
+}
+
+fn allow_sleep(mut keep: ResMut<KeepAwake>) {
+    if let Some(mut child) = keep.0.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
 fn save_unfinished(mut res: Option<ResMut<RaceRes>>, session: Option<Res<training::Session>>) {
     let Some(res) = res.as_deref_mut() else {
         return;
