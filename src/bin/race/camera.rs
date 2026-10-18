@@ -211,7 +211,7 @@ fn spawn_camera(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         },
         // Far enough to see the mountains on the horizon.
         Projection::Perspective(PerspectiveProjection {
-            far: 9000.0,
+            far: 60_000.0,
             ..default()
         }),
         Transform::from_xyz(0.0, 30.0, 60.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -220,15 +220,23 @@ fn spawn_camera(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             color: SKY,
             directional_light_color: Color::srgba(1.0, 0.9, 0.7, 0.4),
             directional_light_exponent: 20.0,
-            // Air: distant hills turn blue and fade into the haze, so the
-            // view no longer runs on for ever.
-            falloff: FogFalloff::from_visibility_colors(
-                3800.0,
-                Color::srgb(0.32, 0.45, 0.62),
-                Color::srgb(0.78, 0.83, 0.9),
-            ),
+            falloff: air(HAZY_M),
         },
     ));
+}
+
+/// How far you can see on most courses; real mountain ranges get clearer air.
+pub const HAZY_M: f32 = 3800.0;
+pub const CLEAR_M: f32 = 18_000.0;
+
+/// Air: distant hills turn blue and fade into the haze, so the view
+/// doesn't run on for ever.
+pub fn air(visibility: f32) -> FogFalloff {
+    FogFalloff::from_visibility_colors(
+        visibility,
+        Color::srgb(0.32, 0.45, 0.62),
+        Color::srgb(0.78, 0.83, 0.9),
+    )
 }
 
 /// After a manual switch, the director leaves the camera alone this long.

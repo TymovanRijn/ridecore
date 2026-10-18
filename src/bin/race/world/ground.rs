@@ -1,14 +1,12 @@
 //! The ground up close: terrain as one smooth-shaded mesh with colors per
-//! corner (no visible triangles), a tiled detail texture so grass and rock
-//! have grain, and grass tufts, flowers and stones along the verges.
+//! corner (no visible triangles; the surface shader adds the grain), and
+//! grass tufts, flowers and stones along the verges.
 
 use std::collections::HashMap;
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::{Image, ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use ridecore::race::course::Course;
 use ridecore::rng::Rng;
@@ -16,9 +14,6 @@ use ridecore::rng::Rng;
 use super::props::{self, Rgba, rgb};
 use super::zones::Zone;
 use super::{RoadIndex, SNOW_LINE_M, TREE_LINE_M, Tris, pose_v};
-
-/// The detail texture repeats every this many meters.
-const DETAIL_M: f32 = 3.5;
 
 /// A terrain mesh on a grid of shared corners, so it can be smooth-shaded.
 #[derive(Default)]
@@ -76,11 +71,6 @@ impl Grid {
             .zip(&normals)
             .map(|(&p, &n)| color(p, n))
             .collect();
-        let uvs: Vec<[f32; 2]> = self
-            .pos
-            .iter()
-            .map(|p| [p.x / DETAIL_M, p.z / DETAIL_M])
-            .collect();
         Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::RENDER_WORLD,
@@ -93,14 +83,13 @@ impl Grid {
             Mesh::ATTRIBUTE_NORMAL,
             normals.iter().map(|n| n.to_array()).collect::<Vec<_>>(),
         )
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
         .with_inserted_indices(Indices::U32(self.idx))
     }
 }
 
 /// Tileable value noise on a `period`-cell lattice over the unit square.
-fn tile_noise(u: f32, v: f32, period: i32, seed: u32) -> f32 {
+pub(super) fn tile_noise(u: f32, v: f32, period: i32, seed: u32) -> f32 {
     let h = |x: i32, y: i32| {
         let (x, y) = (x.rem_euclid(period) as u32, y.rem_euclid(period) as u32);
         let mut k = x.wrapping_mul(0x8da6_b343) ^ y.wrapping_mul(0xd816_3841) ^ seed;
@@ -114,79 +103,6 @@ fn tile_noise(u: f32, v: f32, period: i32, seed: u32) -> f32 {
     let a = h(xi, yi) + (h(xi + 1, yi) - h(xi, yi)) * sx;
     let b = h(xi, yi + 1) + (h(xi + 1, yi + 1) - h(xi, yi + 1)) * sx;
     a + (b - a) * sy
-}
-
-/// A grey, tiling grain multiplied over the ground's colors, with mipmaps so
-/// it doesn't shimmer in the distance.
-pub fn detail_texture() -> Image {
-    const SIZE: usize = 256;
-    let mut level: Vec<f32> = Vec::with_capacity(SIZE * SIZE);
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let (u, v) = (x as f32 / SIZE as f32, y as f32 / SIZE as f32);
-            let n = tile_noise(u, v, 6, 1) * 0.35
-                + tile_noise(u, v, 16, 2) * 0.3
-                + tile_noise(u, v, 48, 3) * 0.2
-                + tile_noise(u, v, 128, 4) * 0.15;
-            // Speckles of light and dark: blades, pebbles, clumps.
-            let speck = tile_noise(u, v, 256, 5);
-            let s = if speck > 0.86 {
-                0.08
-            } else if speck < 0.1 {
-                -0.08
-            } else {
-                0.0
-            };
-            level.push((0.74 + n * 0.3 + s).clamp(0.0, 1.0));
-        }
-    }
-    let mut data = Vec::new();
-    let mut size = SIZE;
-    let mut levels = 0;
-    loop {
-        for &g in &level {
-            let b = (g * 255.0) as u8;
-            data.extend([b, b, b, 255]);
-        }
-        levels += 1;
-        if size == 1 {
-            break;
-        }
-        let half = size / 2;
-        level = (0..half * half)
-            .map(|i| {
-                let (x, y) = (i % half * 2, i / half * 2);
-                (level[y * size + x]
-                    + level[y * size + x + 1]
-                    + level[(y + 1) * size + x]
-                    + level[(y + 1) * size + x + 1])
-                    / 4.0
-            })
-            .collect();
-        size = half;
-    }
-    let mut image = Image::new_uninit(
-        Extent3d {
-            width: SIZE as u32,
-            height: SIZE as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    image.texture_descriptor.mip_level_count = levels;
-    image.data = Some(data);
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        mag_filter: ImageFilterMode::Linear,
-        min_filter: ImageFilterMode::Linear,
-        mipmap_filter: ImageFilterMode::Linear,
-        anisotropy_clamp: 8,
-        ..default()
-    });
-    image
 }
 
 /// Grass blades: thin triangles lit as if they were the ground they grow

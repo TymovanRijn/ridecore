@@ -32,6 +32,8 @@ pub struct Geo {
     corridor_spacing: f32,
     corridor: HashMap<(i32, i32), f32>,
     region: Region,
+    /// The real mountains far beyond the mapped area, when fetched.
+    horizon: Option<Region>,
     /// OpenStreetMap landscape, parsed on first use.
     map_json: Option<&'static str>,
     map: OnceLock<Option<MapData>>,
@@ -85,14 +87,7 @@ impl Geo {
 
     /// (min x, min z, max x, max z) of the mapped area in local meters.
     pub fn bounds(&self) -> [f32; 4] {
-        let r = &self.region;
-        let (x0, z0) = (r.i0 as f32 * r.spacing, r.j0 as f32 * r.spacing);
-        [
-            x0,
-            z0,
-            x0 + (r.ni - 1) as f32 * r.spacing,
-            z0 + (r.nj - 1) as f32 * r.spacing,
-        ]
+        self.region.bounds()
     }
 
     /// The real landscape around the road, when the route has map data.
@@ -104,6 +99,15 @@ impl Geo {
 
     pub fn region_spacing(&self) -> f32 {
         self.region.spacing
+    }
+
+    /// The horizon grid: its spacing and (min x, min z, max x, max z).
+    pub fn horizon(&self) -> Option<(f32, [f32; 4])> {
+        self.horizon.as_ref().map(|r| (r.spacing, r.bounds()))
+    }
+
+    pub fn horizon_height(&self, x: f32, z: f32) -> Option<f32> {
+        self.horizon.as_ref()?.height(x, z)
     }
 
     /// Height from the coarse regional grid only (for distant terrain).
@@ -123,6 +127,16 @@ impl Geo {
 }
 
 impl Region {
+    fn bounds(&self) -> [f32; 4] {
+        let (x0, z0) = (self.i0 as f32 * self.spacing, self.j0 as f32 * self.spacing);
+        [
+            x0,
+            z0,
+            x0 + (self.ni - 1) as f32 * self.spacing,
+            z0 + (self.nj - 1) as f32 * self.spacing,
+        ]
+    }
+
     fn height(&self, x: f32, z: f32) -> Option<f32> {
         let fx = x / self.spacing - self.i0 as f32;
         let fz = z / self.spacing - self.j0 as f32;
@@ -317,6 +331,8 @@ struct RouteFile {
     terrain_spacing_m: f32,
     terrain: Vec<[f64; 3]>,
     area: RegionFile,
+    #[serde(default)]
+    horizon: Option<RegionFile>,
 }
 
 #[derive(Deserialize)]
@@ -345,7 +361,14 @@ fn parse(json: &str) -> Result<Route, serde_json::Error> {
         .iter()
         .map(|c| ((c[0] as i32, c[1] as i32), c[2] as f32))
         .collect();
-    let r = f.area;
+    let region = |r: RegionFile| Region {
+        spacing: r.spacing_m,
+        i0: r.i0,
+        j0: r.j0,
+        ni: r.ni,
+        nj: r.nj,
+        heights: r.heights,
+    };
     Ok(Route {
         id: f.id.clone(),
         name: f.name,
@@ -357,14 +380,8 @@ fn parse(json: &str) -> Result<Route, serde_json::Error> {
             latlon,
             corridor_spacing: f.terrain_spacing_m,
             corridor,
-            region: Region {
-                spacing: r.spacing_m,
-                i0: r.i0,
-                j0: r.j0,
-                ni: r.ni,
-                nj: r.nj,
-                heights: r.heights,
-            },
+            region: region(f.area),
+            horizon: f.horizon.map(region),
             map_json: MAP_FILES
                 .iter()
                 .find(|(id, _)| *id == f.id)

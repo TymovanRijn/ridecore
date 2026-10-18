@@ -15,6 +15,7 @@ and other public sources).
 Needs Pillow for the terrain tiles: pip install pillow
 
 Usage: python3 tools/fetch_routes.py [route-id ...]
+       python3 tools/fetch_routes.py --horizon <route-id ...>   (add far mountains)
 """
 
 import hashlib
@@ -36,6 +37,9 @@ TERRAIN_SPACING_M = 60.0
 TERRAIN_REACH_M = 420.0
 REGION_SPACING_M = 200.0
 REGION_MARGIN_M = 2000.0
+# Optional horizon grid (--horizon): the real mountains out to this far.
+HORIZON_SPACING_M = 500.0
+HORIZON_REACH_M = 22_000.0
 # Routes that follow cycle paths or cobbled lanes use the bicycle network;
 # everything else uses the main road network so climbs stay on the real
 # road instead of shortcutting over footpaths.
@@ -274,6 +278,27 @@ def regional(points, to_xz, to_latlon):
     return {"spacing_m": REGION_SPACING_M, "i0": i0, "j0": j0, "ni": i1 - i0 + 1, "nj": j1 - j0 + 1, "heights": [round(h) for h in heights]}
 
 
+def horizon(rid):
+    """Adds a coarse height grid reaching far beyond the route to an existing
+    route file, so the real mountains stand on the horizon."""
+    path = os.path.join(OUT, rid + ".json")
+    with open(path) as f:
+        data = json.load(f)
+    line = [(lat, lon) for lat, lon, _ in data["points"]]
+    _, to_xz, to_latlon = projector(line)
+    xs, zs = zip(*(to_xz(lat, lon) for lat, lon in line[::5]))
+    cx, cz = (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2
+    s = HORIZON_SPACING_M
+    i0, j0 = math.floor((cx - HORIZON_REACH_M) / s), math.floor((cz - HORIZON_REACH_M) / s)
+    i1, j1 = math.ceil((cx + HORIZON_REACH_M) / s), math.ceil((cz + HORIZON_REACH_M) / s)
+    latlons = [to_latlon(i * s, j * s) for j in range(j0, j1 + 1) for i in range(i0, i1 + 1)]
+    heights = elevations_terrain(latlons)
+    data["horizon"] = {"spacing_m": s, "i0": i0, "j0": j0, "ni": i1 - i0 + 1, "nj": j1 - j0 + 1, "heights": [round(h) for h in heights]}
+    with open(path, "w") as f:
+        json.dump(data, f, separators=(",", ":"))
+    print(f"{rid:22s} horizon {i1 - i0 + 1}x{j1 - j0 + 1} cells, {min(heights):.0f}..{max(heights):.0f} m", flush=True)
+
+
 def limit_grades(ele, dist, max_pct):
     """Smooths only where the 100 m gradient exceeds the climb's known
     maximum (DEM artifacts on hairpins and cliff roads); the rest is kept."""
@@ -326,6 +351,10 @@ def build(rid, name, region, waypoints, ref_km, ref_gain, ref_max):
 def main():
     os.makedirs(CACHE, exist_ok=True)
     os.makedirs(OUT, exist_ok=True)
+    if sys.argv[1:2] == ["--horizon"]:
+        for rid in sys.argv[2:]:
+            horizon(rid)
+        return
     wanted = set(sys.argv[1:])
     for r in ROUTES:
         if wanted and r[0] not in wanted:

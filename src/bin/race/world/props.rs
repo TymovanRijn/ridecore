@@ -16,6 +16,11 @@ pub const fn rgb(r: f32, g: f32, b: f32) -> Rgba {
     [r, g, b, 1.0]
 }
 
+/// Foliage: the surface shader gives these a leafy grain (alpha marks them).
+pub const fn leaf(r: f32, g: f32, b: f32) -> Rgba {
+    [r, g, b, 0.5]
+}
+
 /// Adds a triangle facing away from `inside`, whatever order the corners
 /// are given in, so closed solids are always lit from outside.
 pub fn tri_out(t: &mut Tris, a: Vec3, b: Vec3, c: Vec3, inside: Vec3, color: Rgba) {
@@ -189,25 +194,25 @@ fn pick(rng: &mut Rng, colors: &[Rgba]) -> Rgba {
 }
 
 fn shade(c: Rgba, k: f32) -> Rgba {
-    [c[0] * k, c[1] * k, c[2] * k, 1.0]
+    [c[0] * k, c[1] * k, c[2] * k, c[3]]
 }
 
 const BARK: Rgba = rgb(0.36, 0.25, 0.16);
 const PINES: [Rgba; 3] = [
-    rgb(0.11, 0.32, 0.17),
-    rgb(0.14, 0.38, 0.2),
-    rgb(0.09, 0.27, 0.15),
+    leaf(0.11, 0.32, 0.17),
+    leaf(0.14, 0.38, 0.2),
+    leaf(0.09, 0.27, 0.15),
 ];
 const LEAVES: [Rgba; 3] = [
-    rgb(0.25, 0.5, 0.2),
-    rgb(0.33, 0.56, 0.22),
-    rgb(0.2, 0.44, 0.18),
+    leaf(0.25, 0.5, 0.2),
+    leaf(0.33, 0.56, 0.22),
+    leaf(0.2, 0.44, 0.18),
 ];
 const AUTUMN: [Rgba; 4] = [
-    rgb(0.85, 0.45, 0.12),
-    rgb(0.78, 0.25, 0.12),
-    rgb(0.9, 0.7, 0.2),
-    rgb(0.6, 0.5, 0.15),
+    leaf(0.85, 0.45, 0.12),
+    leaf(0.78, 0.25, 0.12),
+    leaf(0.9, 0.7, 0.2),
+    leaf(0.6, 0.5, 0.15),
 ];
 
 pub fn pine(t: &mut Tris, p: Vec3, s: f32, rng: &mut Rng) {

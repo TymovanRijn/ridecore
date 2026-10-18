@@ -1,5 +1,6 @@
-//! The far scenery: a ring of snow-capped mountains on the horizon, a wide
-//! ground plane out to them, and slowly drifting clouds.
+//! The far scenery: a ring of snow-capped mountains on the horizon (unless
+//! the route has real ones), a wide ground plane out to them, and slowly
+//! drifting clouds.
 
 use std::f32::consts::TAU;
 
@@ -19,7 +20,10 @@ pub struct Cloud {
     span: f32,
 }
 
-pub fn spawn(
+/// Made-up mountains well beyond the terrain, fading into the haze, and a
+/// ground plane out to them. Routes with real mountains on the horizon
+/// don't need these.
+pub fn mountains(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -33,8 +37,6 @@ pub fn spawn(
         perceptual_roughness: 1.0,
         ..default()
     });
-
-    // Mountains well beyond the terrain, fading into the haze.
     let mut far = Tris::default();
     let ring = radius + 1400.0;
     for k in 0..64 {
@@ -95,7 +97,18 @@ pub fn spawn(
         WorldPart,
         NotShadowCaster,
     ));
+}
 
+/// Slowly drifting clouds over the course.
+pub fn spawn(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    center: Vec2,
+    radius: f32,
+    base_y: f32,
+    rng: &mut Rng,
+) {
     // Clouds: a few puffs each, lit softly so they read as bright.
     let white = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 1.0, 1.0),
@@ -157,7 +170,8 @@ pub const HAZE: Color = Color::srgb(0.70, 0.79, 0.90);
 #[derive(Component)]
 pub struct SkyDome;
 
-const DOME_R: f32 = 7000.0;
+/// Beyond the farthest mountains.
+const DOME_R: f32 = 45_000.0;
 
 /// A gradient sky from deep blue overhead to pale haze at the horizon,
 /// warmer around the sun, plus a glowing sun disk.

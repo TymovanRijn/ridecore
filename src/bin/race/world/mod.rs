@@ -7,6 +7,7 @@ mod ground;
 mod osm;
 mod props;
 mod sky;
+mod terrain;
 pub use sky::HAZE;
 mod zones;
 
@@ -52,6 +53,7 @@ pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
+        terrain::setup(app);
         app.insert_resource(GlobalAmbientLight {
             color: Color::srgb(0.75, 0.85, 1.0),
             brightness: 450.0,
@@ -416,6 +418,25 @@ fn pose_v(course: &Course, d: f64, lateral: f32) -> (Vec3, Vec3) {
     (Vec3::from_array(p.pos), Vec3::new(p.dir[0], 0.0, p.dir[1]))
 }
 
+/// Spawns one static piece of the world.
+fn part<M: Material>(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    mesh: Mesh,
+    material: Handle<M>,
+    shadows: bool,
+) {
+    let mut e = commands.spawn((
+        Mesh3d(meshes.add(mesh)),
+        MeshMaterial3d(material),
+        Transform::default(),
+        WorldPart,
+    ));
+    if !shadows {
+        e.insert(NotShadowCaster);
+    }
+}
+
 /// Spectators cheer harder the closer the riders are.
 #[derive(Component)]
 struct Spectator {
@@ -437,6 +458,8 @@ fn spawn_world(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    mut surfaces: ResMut<Assets<terrain::Surface>>,
+    mut fog: Query<&mut DistanceFog>,
     res: Res<RaceRes>,
 ) {
     let started = std::time::Instant::now();
@@ -479,44 +502,50 @@ fn spawn_world(
         perceptual_roughness: 0.95,
         ..default()
     });
-    let mut part =
-        |commands: &mut Commands, mesh: Mesh, material: Handle<StandardMaterial>, shadows: bool| {
-            let mut e = commands.spawn((
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(material),
-                Transform::default(),
-                WorldPart,
-            ));
-            if !shadows {
-                e.insert(NotShadowCaster);
-            }
-        };
 
+    let [ground_surface, asphalt, scenery_surface] = terrain::materials(&mut images, &mut surfaces);
     let (road, lines) = road_meshes(course, &ds);
-    part(&mut commands, road, vertex_colored.clone(), false);
-    part(&mut commands, lines, vertex_colored.clone(), false);
+    part(&mut commands, &mut meshes, road, asphalt, false);
+    part(
+        &mut commands,
+        &mut meshes,
+        lines,
+        vertex_colored.clone(),
+        false,
+    );
 
-    // Ground: vertex colors with a grain texture over them.
-    let soil = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        base_color_texture: Some(images.add(ground::detail_texture())),
-        perceptual_roughness: 0.97,
-        reflectance: 0.2,
-        ..default()
-    });
+    // Ground: vertex colors, textured per pixel by the surface shader.
     let colored = |p: Vec3, n: Vec3| index.ground_color(p, n.y);
     let (min, max) = match &geo {
         Some(g) => {
             let (near, far, bounds) = real_terrain(&index, g);
-            part(&mut commands, near.mesh(colored), soil.clone(), false);
+            part(
+                &mut commands,
+                &mut meshes,
+                near.mesh(colored),
+                ground_surface.clone(),
+                false,
+            );
             if !far.is_empty() {
-                part(&mut commands, far.mesh(colored), soil.clone(), false);
+                part(
+                    &mut commands,
+                    &mut meshes,
+                    far.mesh(colored),
+                    ground_surface.clone(),
+                    false,
+                );
             }
             bounds
         }
         None => {
             let (ground, bounds) = generated_terrain(&index);
-            part(&mut commands, ground.mesh(colored), soil.clone(), false);
+            part(
+                &mut commands,
+                &mut meshes,
+                ground.mesh(colored),
+                ground_surface.clone(),
+                false,
+            );
             // Water at one level everywhere; it only shows where the ground is lower.
             let water = materials.add(StandardMaterial {
                 base_color: Color::srgba(0.16, 0.36, 0.52, 0.88),
@@ -535,7 +564,7 @@ fn spawn_world(
                 Vec3::new(hi.x, y, lo.y),
                 [1.0; 4],
             );
-            part(&mut commands, lake.mesh(), water, false);
+            part(&mut commands, &mut meshes, lake.mesh(), water, false);
             bounds
         }
     };
@@ -554,17 +583,30 @@ fn spawn_world(
             osm::herds(&mut scenery, &index, map, &mut rng);
             let roads = osm::side_roads(&index, map);
             for tile in roads.split(TILE_M) {
-                part(&mut commands, tile.mesh(), vertex_colored.clone(), false);
+                part(
+                    &mut commands,
+                    &mut meshes,
+                    tile.mesh(),
+                    vertex_colored.clone(),
+                    false,
+                );
             }
             let (canopy, edges) = osm::canopy(&index, map);
             if !canopy.is_empty() {
                 part(
                     &mut commands,
+                    &mut meshes,
                     canopy.mesh(|p, _| osm::canopy_color(p)),
-                    soil.clone(),
+                    scenery_surface.clone(),
                     false,
                 );
-                part(&mut commands, edges.mesh(), vertex_colored.clone(), false);
+                part(
+                    &mut commands,
+                    &mut meshes,
+                    edges.mesh(),
+                    scenery_surface.clone(),
+                    false,
+                );
             }
             let river = osm::water(&index, map);
             if !river.is_empty() {
@@ -575,17 +617,35 @@ fn spawn_world(
                     reflectance: 0.6,
                     ..default()
                 });
-                part(&mut commands, river.mesh(|_, _| [1.0; 4]), water, false);
+                part(
+                    &mut commands,
+                    &mut meshes,
+                    river.mesh(|_, _| [1.0; 4]),
+                    water,
+                    false,
+                );
             }
         }
         None => backdrop(&mut scenery, &index, min, max, &mut rng),
     }
     // In tiles, so the camera and each shadow cascade skip what they can't see.
     for tile in scenery.split(TILE_M) {
-        part(&mut commands, tile.mesh(), vertex_colored.clone(), true);
+        part(
+            &mut commands,
+            &mut meshes,
+            tile.mesh(),
+            scenery_surface.clone(),
+            true,
+        );
     }
     for tile in stones.split(TILE_M) {
-        part(&mut commands, tile.mesh(), vertex_colored.clone(), false);
+        part(
+            &mut commands,
+            &mut meshes,
+            tile.mesh(),
+            vertex_colored.clone(),
+            false,
+        );
     }
     let grass = materials.add(StandardMaterial {
         base_color: Color::WHITE,
@@ -651,12 +711,47 @@ fn spawn_world(
         }
         None => (min, max, index.mean_elevation),
     };
+    // Real mountains on the horizon when the route has them; otherwise a
+    // ring of made-up peaks.
+    let horizon = geo.as_deref().and_then(horizon_terrain);
+    let real_horizon = horizon.is_some();
+    if let Some(grid) = horizon {
+        part(
+            &mut commands,
+            &mut meshes,
+            grid.mesh(far_color),
+            ground_surface.clone(),
+            false,
+        );
+    }
+    for mut fog in &mut fog {
+        fog.falloff = crate::camera::air(if real_horizon {
+            crate::camera::CLEAR_M
+        } else {
+            crate::camera::HAZY_M
+        });
+    }
+    let (sky_center, sky_radius) = (
+        (sky_min + sky_max) / 2.0,
+        (sky_max - sky_min).length() / 2.0,
+    );
+    if !real_horizon {
+        sky::mountains(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            sky_center,
+            sky_radius,
+            ground_y,
+            &mut rng,
+        );
+    }
     sky::spawn(
         &mut commands,
         &mut meshes,
         &mut materials,
-        (sky_min + sky_max) / 2.0,
-        (sky_max - sky_min).length() / 2.0,
+        sky_center,
+        sky_radius,
         ground_y,
         &mut rng,
     );
@@ -762,6 +857,84 @@ fn real_terrain(index: &RoadIndex, geo: &Geo) -> (Grid, Grid, (Vec2, Vec2)) {
         }
     }
     (near, far, (min, max))
+}
+
+/// The real mountains beyond the mapped area, from the route's coarse
+/// horizon grid. Under the mapped area it follows that terrain a little
+/// lower, so the finer meshes cover it without a seam.
+fn horizon_terrain(geo: &Geo) -> Option<Grid> {
+    let (s, [x0, z0, x1, z1]) = geo.horizon()?;
+    let [rx0, rz0, rx1, rz1] = geo.bounds();
+    let inside = |x: f32, z: f32| x > rx0 && x < rx1 && z > rz0 && z < rz1;
+    let pos = |i: i32, j: i32| (x0 + i as f32 * s, z0 + j as f32 * s);
+    let mut grid = Grid::default();
+    // The grid's last row and column have no cell beyond them.
+    let (ni, nj) = (((x1 - x0) / s) as i32 - 1, ((z1 - z0) / s) as i32 - 1);
+    for j in 0..nj {
+        for i in 0..ni {
+            let keys = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)];
+            if keys.iter().all(|&(a, b)| {
+                let (x, z) = pos(a, b);
+                inside(x, z)
+            }) {
+                continue;
+            }
+            let mut ids = [0; 4];
+            for (k, &(a, b)) in keys.iter().enumerate() {
+                let (x, z) = pos(a, b);
+                let h = if inside(x, z) {
+                    geo.region_height(x, z).map(|h| h - 4.0)
+                } else {
+                    None
+                };
+                let Some(h) = h.or_else(|| geo.horizon_height(x, z)) else {
+                    break;
+                };
+                ids[k] = grid.corner((a, b), || Vec3::new(x, h, z));
+            }
+            grid.cell(ids[0], ids[1], ids[2], ids[3]);
+        }
+    }
+    (!grid.is_empty()).then_some(grid)
+}
+
+/// Distant slopes by height: farmland in the valleys, dark forest up the
+/// sides, alpine grass above the tree line and scree towards the summits.
+/// The surface shader adds the cliffs and the snow.
+fn far_color(p: Vec3, n: Vec3) -> Rgba {
+    let k = fbm(p.x / 1500.0, p.z / 1500.0) * 0.05;
+    let mix = |a: [f32; 3], b: [f32; 3], t: f32| {
+        let t = t.clamp(0.0, 1.0);
+        [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ]
+    };
+    let valley = [0.3 + k, 0.44 + k, 0.2];
+    let forest = [0.11 + k, 0.2 + k, 0.09];
+    let alpine = [0.36 + k, 0.42 + k, 0.25];
+    let scree = [0.45 + k, 0.43 + k, 0.39];
+    let flat = smoothstep(0.93, 0.99, n.y);
+    let low = mix(
+        forest,
+        valley,
+        flat * (1.0 - smoothstep(900.0, 1300.0, p.y)),
+    );
+    let c = if p.y < TREE_LINE_M - 200.0 {
+        mix(
+            low,
+            alpine,
+            smoothstep(TREE_LINE_M - 500.0, TREE_LINE_M - 200.0, p.y),
+        )
+    } else {
+        mix(
+            alpine,
+            scree,
+            smoothstep(TREE_LINE_M + 100.0, TREE_LINE_M + 500.0, p.y),
+        )
+    };
+    rgb(c[0], c[1], c[2])
 }
 
 fn road_meshes(course: &Course, ds: &[f64]) -> (Mesh, Mesh) {
