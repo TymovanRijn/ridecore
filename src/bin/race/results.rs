@@ -34,6 +34,51 @@ fn gap_text(gap_s: f32) -> String {
     }
 }
 
+fn clock(s: f32) -> String {
+    let s = s.round() as u32;
+    if s >= 3600 {
+        format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+    } else {
+        format!("{}:{:02}", s / 60, s % 60)
+    }
+}
+
+/// Your time against your best ride on this course.
+fn best_line(res: &RaceRes) -> Option<egui::RichText> {
+    let mine = res.race.player().finish_time?;
+    let new_best = res.new_best?;
+    let (text, color) = match (&res.best, new_best) {
+        (None, _) => (
+            tf!(
+                "Eerste keer op deze koers: {} is je tijd om te verslaan",
+                "First time on this course: {} is your time to beat",
+                clock(mine)
+            ),
+            egui::Color32::from_rgb(170, 215, 255),
+        ),
+        (Some(b), true) => (
+            tf!(
+                "Persoonlijk record! {} ({} sneller)",
+                "Personal best! {} ({} faster)",
+                clock(mine),
+                clock(b.finish_s - mine)
+            ),
+            egui::Color32::from_rgb(80, 220, 120),
+        ),
+        (Some(b), false) => (
+            tf!(
+                "{} · je beste tijd hier is {} ({} langzamer)",
+                "{} · your best here is {} ({} slower)",
+                clock(mine),
+                clock(b.finish_s),
+                clock(mine - b.finish_s)
+            ),
+            egui::Color32::LIGHT_GRAY,
+        ),
+    };
+    Some(egui::RichText::new(text).size(20.0).strong().color(color))
+}
+
 fn color(race: &Race, rider: usize) -> egui::Color32 {
     let [r, g, b] = race.teams[race.riders[rider].team].spec.color;
     egui::Color32::from_rgb(r, g, b)
@@ -85,6 +130,9 @@ fn results_ui(
                     ))
                     .size(26.0),
                 );
+            }
+            if let Some(line) = best_line(&res) {
+                ui.label(line);
             }
             let (xp, done, tried) = res.xp;
             ui.label(

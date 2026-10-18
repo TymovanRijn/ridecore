@@ -6,6 +6,7 @@
 
 use std::f32::consts::{PI, TAU};
 
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
 use ridecore::race::ai::Intent;
@@ -47,12 +48,22 @@ const ROAD_LIFT: f32 = 0.12;
 #[derive(Component)]
 pub struct RiderModel {
     pub index: usize,
-    crank: f32,
-    wheel: f32,
-    stand: f32,
     /// Out of the saddle because of a hard effort (kept with hysteresis).
     surging: bool,
 }
+
+/// Where a rider (or the ghost) is in their pedal stroke.
+#[derive(Component, Default)]
+struct Pedaling {
+    crank: f32,
+    wheel: f32,
+    /// 0 seated, 1 standing on the pedals.
+    stand: f32,
+}
+
+/// Your best ride on this course, riding along translucent.
+#[derive(Component)]
+pub struct GhostRider;
 
 #[derive(Component)]
 struct WheelSpin;
@@ -102,7 +113,14 @@ impl Plugin for RidersPlugin {
             .add_systems(OnEnter(Screen::Setup), despawn_riders)
             .add_systems(
                 Update,
-                (place_riders, animate_riders, bob_marker, dress_leaders)
+                (
+                    place_riders,
+                    place_ghost,
+                    animate_riders,
+                    bob_marker,
+                    dress_leaders,
+                    ghost_casts_no_shadow,
+                )
                     .chain()
                     .after(crate::advance_race)
                     .in_set(RidersPlaced)
@@ -145,7 +163,9 @@ struct TeamKit {
     frame: Handle<StandardMaterial>,
 }
 
-fn despawn_riders(mut commands: Commands, riders: Query<Entity, With<RiderModel>>) {
+type RiderOrGhost = (With<RiderModel>, With<GhostRider>);
+
+fn despawn_riders(mut commands: Commands, riders: Query<Entity, Or<RiderOrGhost>>) {
     for e in &riders {
         commands.entity(e).despawn();
     }
@@ -256,10 +276,11 @@ fn spawn_riders(
             .spawn((
                 RiderModel {
                     index: i,
-                    crank: (i as f32 * 1.37) % TAU,
-                    wheel: 0.0,
-                    stand: 0.0,
                     surging: false,
+                },
+                Pedaling {
+                    crank: (i as f32 * 1.37) % TAU,
+                    ..default()
                 },
                 Transform::default(),
                 Visibility::default(),
@@ -278,6 +299,47 @@ fn spawn_riders(
                 ChildOf(root),
             ));
         }
+    }
+
+    if res.best.is_some() {
+        let ghost = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.8, 0.93, 1.0, 0.45),
+            emissive: LinearRgba::rgb(0.35, 0.6, 0.9),
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        });
+        let pal = Palette {
+            cloth: ghost.clone(),
+            parts: ghost.clone(),
+            skin: std::array::from_fn(|_| ghost.clone()),
+        };
+        let kit = TeamKit {
+            torso: meshes.add(shapes::torso(
+                LinearRgba::WHITE,
+                LinearRgba::WHITE,
+                shapes::Design::Plain,
+            )),
+            jersey: ghost.clone(),
+            frame: ghost,
+        };
+        let root = commands
+            .spawn((
+                GhostRider,
+                Pedaling::default(),
+                Transform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        spawn_bike(&mut commands, root, &shapes, &pal, &kit);
+        spawn_body(
+            &mut commands,
+            root,
+            usize::MAX,
+            &shapes,
+            &pal,
+            &pal.cloth,
+            &kit,
+        );
     }
 }
 
@@ -378,15 +440,15 @@ fn rider_transform(race: &Race, dist: f64, lateral: f32) -> Transform {
 
 fn place_riders(
     res: Res<RaceRes>,
-    mut riders: Query<(&mut RiderModel, &mut Transform)>,
+    mut riders: Query<(&mut RiderModel, &mut Pedaling, &mut Transform)>,
     time: Res<Time>,
 ) {
     let race = &res.race;
     let dt = if res.paused { 0.0 } else { time.delta_secs() };
-    for (mut model, mut tf) in &mut riders {
+    for (mut model, mut pedal, mut tf) in &mut riders {
         let r = &race.riders[model.index];
-        model.crank = (model.crank + r.cadence / 60.0 * TAU * dt) % TAU;
-        model.wheel = (model.wheel + r.speed / WHEEL_R * dt) % TAU;
+        pedal.crank = (pedal.crank + r.cadence / 60.0 * TAU * dt) % TAU;
+        pedal.wheel = (pedal.wheel + r.speed / WHEEL_R * dt) % TAU;
         let wants = wants_to_stand(
             r,
             race.course.grade_pct_at(r.dist),
@@ -394,13 +456,50 @@ fn place_riders(
             &mut model.surging,
         );
         let target = if wants && r.cadence > 0.0 { 1.0 } else { 0.0 };
-        model.stand += (target - model.stand) * (dt * 4.0).min(1.0);
+        pedal.stand += (target - pedal.stand) * (dt * 4.0).min(1.0);
 
         let mut t = rider_transform(race, r.dist, r.lateral);
         // Out of the saddle the bike rocks with each pedal stroke.
-        let rock = model.crank.sin() * 0.11 * model.stand;
+        let rock = pedal.crank.sin() * 0.11 * pedal.stand;
         t.rotation *= Quat::from_rotation_z(rock);
         *tf = t;
+    }
+}
+
+/// The ghost rides where you were at this time on your best ride, a little
+/// to the side of you.
+fn place_ghost(
+    res: Res<RaceRes>,
+    mut ghosts: Query<(&mut Pedaling, &mut Transform), With<GhostRider>>,
+    time: Res<Time>,
+) {
+    let Some(best) = &res.best else {
+        return;
+    };
+    let race = &res.race;
+    let dt = if res.paused { 0.0 } else { time.delta_secs() };
+    let d = best.dist_at(race.time);
+    let speed = best.dist_at(race.time + 0.5) - best.dist_at(race.time - 0.5);
+    let me = race.player();
+    let lateral = me.lateral + if me.lateral > 0.0 { -0.9 } else { 0.9 };
+    for (mut pedal, mut tf) in &mut ghosts {
+        let cadence = if speed > 0.5 { 88.0 } else { 0.0 };
+        pedal.crank = (pedal.crank + cadence / 60.0 * TAU * dt) % TAU;
+        pedal.wheel = (pedal.wheel + speed / WHEEL_R * dt) % TAU;
+        *tf = rider_transform(race, d as f64, lateral);
+    }
+}
+
+/// The ghost is see-through, so it shouldn't throw a shadow.
+fn ghost_casts_no_shadow(
+    mut commands: Commands,
+    ghosts: Query<Entity, Added<GhostRider>>,
+    children: Query<&Children>,
+) {
+    for ghost in &ghosts {
+        for part in children.iter_descendants(ghost) {
+            commands.entity(part).insert(NotShadowCaster);
+        }
     }
 }
 
@@ -414,7 +513,7 @@ type WheelFilter = (
 type CrankFilter = (With<CrankSpin>, Without<Body>, Without<Limb>);
 
 fn animate_riders(
-    riders: Query<(&RiderModel, &Children)>,
+    riders: Query<(&Pedaling, &Children)>,
     mut wheels: Query<&mut Transform, WheelFilter>,
     mut cranks: Query<&mut Transform, CrankFilter>,
     mut bodies: Query<&mut Transform, (With<Body>, Without<Limb>)>,

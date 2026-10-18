@@ -12,7 +12,7 @@ use ridecore::tf;
 
 use crate::camera::CameraRig;
 use crate::link::{InputSettings, PlayerInput, Trainer};
-use crate::riders::RiderModel;
+use crate::riders::{GhostRider, RiderModel};
 use crate::{RaceRes, Screen};
 
 const ORDERS: [(KeyCode, TeamOrder); 5] = [
@@ -70,6 +70,35 @@ fn race_keys(
     }
 }
 
+/// How you're doing against your best ride: green ahead, red behind.
+fn ghost_gap(gap: f32) -> egui::RichText {
+    let (text, color) = if gap.abs() < 0.5 {
+        (
+            t("Gelijk met je beste rit", "Level with your best ride").to_string(),
+            egui::Color32::from_rgb(170, 215, 255),
+        )
+    } else if gap < 0.0 {
+        (
+            tf!(
+                "{:.1} s voor op je beste rit",
+                "{:.1} s ahead of your best ride",
+                -gap
+            ),
+            egui::Color32::from_rgb(80, 220, 120),
+        )
+    } else {
+        (
+            tf!(
+                "{:.1} s achter je beste rit",
+                "{:.1} s behind your best ride",
+                gap
+            ),
+            egui::Color32::from_rgb(255, 110, 90),
+        )
+    };
+    egui::RichText::new(text).size(18.0).strong().color(color)
+}
+
 fn fmt_time(s: f32) -> String {
     let s = s.max(0.0) as u32;
     if s >= 3600 {
@@ -105,6 +134,7 @@ fn hud(
     mut next: ResMut<NextState<Screen>>,
     camera: Query<(&Camera, &GlobalTransform)>,
     riders: Query<(&RiderModel, &GlobalTransform)>,
+    ghost: Query<&GlobalTransform, With<GhostRider>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let race = &res.race;
@@ -317,6 +347,14 @@ fn hud(
                             );
                         }
                         ui.label(egui::RichText::new(line).color(egui::Color32::LIGHT_GRAY));
+                        if let Some(gap) = res
+                            .best
+                            .as_ref()
+                            .filter(|_| !me.finished())
+                            .and_then(|b| b.gap(race.time, me.dist as f32))
+                        {
+                            ui.label(ghost_gap(gap));
+                        }
                     }
                 });
             });
@@ -479,7 +517,7 @@ fn hud(
         });
 
     profile_strip(ctx, race);
-    name_tags(ctx, race, &camera, &riders);
+    name_tags(ctx, race, &camera, &riders, ghost.single().ok());
 
     if res.paused {
         egui::Area::new("pause".into())
@@ -635,12 +673,36 @@ fn name_tags(
     race: &Race,
     camera: &Query<(&Camera, &GlobalTransform)>,
     riders: &Query<(&RiderModel, &GlobalTransform)>,
+    ghost: Option<&GlobalTransform>,
 ) {
     let Ok((cam, cam_tf)) = camera.single() else {
         return;
     };
+    let tag = |text: String, at: Vec3, color: egui::Color32| {
+        if (at - cam_tf.translation()).length() > 80.0 {
+            return;
+        }
+        let Ok(p) = cam.world_to_viewport(cam_tf, at) else {
+            return;
+        };
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, "tags".into()));
+        let galley =
+            painter.layout_no_wrap(text, egui::FontId::proportional(13.0), egui::Color32::WHITE);
+        let bg = egui::Rect::from_center_size(
+            egui::pos2(p.x, p.y),
+            galley.size() + egui::vec2(10.0, 4.0),
+        );
+        painter.rect_filled(bg, 4.0, color);
+        painter.galley(bg.min + egui::vec2(5.0, 2.0), galley, egui::Color32::WHITE);
+    };
+    if let Some(g) = ghost {
+        tag(
+            t("Je beste rit", "Your best").into(),
+            g.translation() + Vec3::Y * 2.0,
+            egui::Color32::from_rgba_unmultiplied(90, 150, 210, 190),
+        );
+    }
     let me = race.player();
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, "tags".into()));
     // Teammates always; otherwise only the few riders right around you.
     let mut close: Vec<usize> = race
         .riders
@@ -660,14 +722,6 @@ fn name_tags(
         if r.human || r.finished() || !(mate || close.contains(&r.id)) {
             continue;
         }
-        let head = tf.translation() + Vec3::Y * 2.0;
-        if (head - cam_tf.translation()).length() > 80.0 {
-            continue;
-        }
-        let Ok(p) = cam.world_to_viewport(cam_tf, head) else {
-            continue;
-        };
-        let pos = egui::pos2(p.x, p.y);
         let mut text = r.profile.name.clone();
         if mate {
             text = format!("★ {text}");
@@ -675,10 +729,10 @@ fn name_tags(
         if matches!(r.intent, Intent::Attack { .. } | Intent::Sprint { .. }) {
             text += " ⚡";
         }
-        let galley =
-            painter.layout_no_wrap(text, egui::FontId::proportional(13.0), egui::Color32::WHITE);
-        let bg = egui::Rect::from_center_size(pos, galley.size() + egui::vec2(10.0, 4.0));
-        painter.rect_filled(bg, 4.0, team_color(race, r.id).gamma_multiply(0.75));
-        painter.galley(bg.min + egui::vec2(5.0, 2.0), galley, egui::Color32::WHITE);
+        tag(
+            text,
+            tf.translation() + Vec3::Y * 2.0,
+            team_color(race, r.id).gamma_multiply(0.75),
+        );
     }
 }

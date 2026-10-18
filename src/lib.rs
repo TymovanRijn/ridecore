@@ -7,6 +7,7 @@ pub mod click;
 pub mod custom;
 pub mod fit;
 pub mod ftms;
+pub mod ghost;
 pub mod i18n;
 pub mod map;
 pub mod physics;

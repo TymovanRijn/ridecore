@@ -23,6 +23,7 @@ use bevy::window::PresentMode;
 use bevy_egui::EguiPlugin;
 
 use ridecore::fit::{self, Sample};
+use ridecore::ghost::Ghost;
 use ridecore::race::Race;
 
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -47,20 +48,71 @@ pub struct RaceRes {
     pub since_finish: f32,
     /// Challenge score: XP, challenges completed, challenges attempted.
     pub xp: (u32, u32, u32),
+    /// Your best ride on this course before this one, riding along as a
+    /// ghost.
+    pub best: Option<Ghost>,
+    /// Set at the finish: whether this ride became your new best.
+    pub new_best: Option<bool>,
 }
 
 impl RaceRes {
     pub fn new(race: Race) -> Self {
         Self {
-            race,
             paused: false,
             samples: Vec::new(),
             saved: None,
             sheltered_s: 0,
             since_finish: 0.0,
             xp: (0, 0, 0),
+            best: best_ride(&race),
+            new_best: None,
+            race,
         }
     }
+}
+
+/// Your best ride on the course. Test runs (`RIDECORE_SHOTS`) leave your
+/// rides alone; `RIDECORE_GHOST_DEMO=1` gives them a ghost riding a little
+/// ahead of you.
+fn best_ride(race: &Race) -> Option<Ghost> {
+    let (route, laps) = (&race.course.route.id, race.course.laps);
+    if std::env::var_os("RIDECORE_GHOST_DEMO").is_some() {
+        let start = race.player().dist.max(0.0);
+        let dist: Vec<f64> = (0..7200).map(|s| start + 4.0 + s as f64 * 2.8).collect();
+        return Some(Ghost::new(route, laps, 0, 7200.0, &dist));
+    }
+    if std::env::var_os("RIDECORE_SHOTS").is_some() {
+        return None;
+    }
+    Ghost::load(route, laps)
+}
+
+/// Keeps this ride as your ghost if it's the fastest on the course so far.
+fn keep_if_best(res: &mut RaceRes) {
+    let race = &res.race;
+    let Some(finish) = race.player().finish_time else {
+        return;
+    };
+    let dist: Vec<f64> = res.samples.iter().map(|s| s.distance_m).collect();
+    // Rides that didn't start at the line (a test skipping ahead) don't count.
+    if dist.first().is_none_or(|&d| d > 50.0) {
+        return;
+    }
+    let ride = Ghost::new(
+        &race.course.route.id,
+        race.course.laps,
+        fit::now_unix(),
+        finish,
+        &dist,
+    );
+    let better = ride.beats(res.best.as_ref());
+    if better
+        && std::env::var_os("RIDECORE_SHOTS").is_none()
+        && let Err(e) = ride.save()
+    {
+        warn!("couldn't keep your best ride: {e}");
+    }
+    res.new_best = Some(better);
 }
 
 /// Sky and fog share one color so the horizon blends in.
@@ -157,6 +209,7 @@ pub fn advance_race(
         // A moment after the line, so the finish XP is counted.
         if res.saved.is_none() && res.samples.len() > 10 && res.since_finish > 0.5 {
             res.saved = Some(share::save_ride(res));
+            keep_if_best(res);
         }
         if *screen.get() == Screen::Racing && res.since_finish > 6.0 {
             next.set(Screen::Results);
