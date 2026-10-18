@@ -52,6 +52,7 @@ fn climb_panel(mut contexts: EguiContexts, res: Res<RaceRes>) -> Result {
         .anchor(egui::Align2::RIGHT_BOTTOM, [-16.0, -126.0])
         .interactable(false)
         .show(ctx, |ui| {
+            crate::hud::see_through(ui);
             crate::hud::glass().show(ui, |ui| {
                 ui.set_width(width);
                 header(ui, race, climb, index, d);

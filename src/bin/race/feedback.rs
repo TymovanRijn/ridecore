@@ -288,6 +288,7 @@ fn draw_feedback(
             // Under the race strip.
             .anchor(egui::Align2::CENTER_TOP, [0.0, 196.0])
             .show(ctx, |ui| {
+                crate::hud::see_through(ui);
                 let pulse = if o.urgent {
                     0.75 + 0.25 * (t * 8.0).sin().abs()
                 } else {
@@ -336,6 +337,7 @@ fn draw_feedback(
         .anchor(egui::Align2::LEFT_CENTER, [16.0, 40.0])
         .interactable(false)
         .show(ctx, |ui| {
+            crate::hud::see_through(ui);
             let ch = &fb.challenges;
             let pop = 1.0 + 0.4 * (1.0 - ((now - fb.xp_at) as f32 / 0.5).clamp(0.0, 1.0));
             crate::hud::glass().show(ui, |ui| {
@@ -401,6 +403,7 @@ fn draw_feedback(
         .anchor(egui::Align2::CENTER_CENTER, [0.0, -150.0])
         .interactable(false)
         .show(ctx, |ui| {
+            crate::hud::see_through(ui);
             ui.vertical_centered(|ui| {
                 for toast in fb.toasts.iter().rev().take(3) {
                     let age = (now - toast.born) as f32;

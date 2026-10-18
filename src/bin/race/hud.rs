@@ -103,6 +103,30 @@ pub fn caps(text: &str) -> egui::RichText {
         .color(LABEL)
 }
 
+/// Where the rider followed is on screen (a box around them), kept from
+/// the last frame so every panel can get out of the way.
+fn focus_id() -> egui::Id {
+    egui::Id::new("hud-focus")
+}
+
+/// Call first inside a panel: it fades to see-through while the rider
+/// followed is behind it, so you can always see them.
+pub fn see_through(ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
+    let id = ui.layer_id().id;
+    let focus: Option<egui::Rect> = ctx.data(|d| d.get_temp(focus_id())).flatten();
+    let covering = match (focus, ctx.memory(|m| m.area_rect(id))) {
+        (Some(f), Some(panel)) => panel.intersects(f),
+        _ => false,
+    };
+    let opacity = ctx.animate_value_with_time(
+        id.with("see-through"),
+        if covering { 0.25 } else { 1.0 },
+        0.3,
+    );
+    ui.multiply_opacity(opacity);
+}
+
 /// A big number with its unit and a label above.
 fn metric(ui: &mut egui::Ui, label: &str, value: String, unit: &str, color: egui::Color32) {
     metric_sized(ui, label, value, unit, color, 36.0);
@@ -475,6 +499,7 @@ fn ride_overlay(
     let top = egui::Area::new("numbers".into())
         .anchor(egui::Align2::CENTER_TOP, [0.0, MARGIN])
         .show(ctx, |ui| {
+            see_through(ui);
             glass().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 22.0;
@@ -554,6 +579,7 @@ fn ride_overlay(
     egui::Area::new("race".into())
         .anchor(egui::Align2::CENTER_TOP, [0.0, top.bottom() + 8.0])
         .show(ctx, |ui| {
+            see_through(ui);
             glass()
                 .inner_margin(egui::Margin::symmetric(16, 8))
                 .show(ui, |ui| {
@@ -607,6 +633,7 @@ fn ride_overlay(
     egui::Area::new("me".into())
         .anchor(egui::Align2::LEFT_TOP, [MARGIN, MARGIN])
         .show(ctx, |ui| {
+            see_through(ui);
             glass().show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 6.0;
                 reserve(ui, me, input.power_3s);
@@ -688,6 +715,7 @@ fn ride_overlay(
     egui::Area::new("groups".into())
         .anchor(egui::Align2::RIGHT_TOP, [-MARGIN, MARGIN])
         .show(ctx, |ui| {
+            see_through(ui);
             glass().show(ui, |ui| {
                 ui.set_width(290.0);
                 ui.spacing_mut().item_spacing.y = 4.0;
@@ -820,6 +848,7 @@ fn orders(ctx: &egui::Context, race: &Race, rig: &CameraRig) -> Option<TeamOrder
     egui::Area::new("orders".into())
         .anchor(egui::Align2::LEFT_BOTTOM, [MARGIN, -MARGIN])
         .show(ctx, |ui| {
+            see_through(ui);
             glass().show(ui, |ui| {
                 ui.label(caps(&tf!(
                     "Ploegorders · {} ({})",
@@ -873,6 +902,7 @@ fn watch_overlay(
     egui::Area::new("live".into())
         .anchor(egui::Align2::CENTER_TOP, [0.0, MARGIN])
         .show(ctx, |ui| {
+            see_through(ui);
             glass()
                 .inner_margin(egui::Margin::symmetric(16, 8))
                 .show(ui, |ui| {
@@ -928,6 +958,7 @@ fn watch_overlay(
     egui::Area::new("followed".into())
         .anchor(egui::Align2::LEFT_TOP, [MARGIN, MARGIN])
         .show(ctx, |ui| {
+            see_through(ui);
             glass().show(ui, |ui| {
                 ui.set_width(330.0);
                 let top = ui.cursor().min;
@@ -999,6 +1030,7 @@ fn watch_overlay(
     egui::Area::new("order".into())
         .anchor(egui::Align2::RIGHT_TOP, [-MARGIN, MARGIN])
         .show(ctx, |ui| {
+            see_through(ui);
             glass().show(ui, |ui| {
                 ui.set_width(300.0);
                 ui.label(caps(t(
@@ -1086,6 +1118,7 @@ fn watch_overlay(
     egui::Area::new("playback".into())
         .anchor(egui::Align2::LEFT_BOTTOM, [MARGIN, -MARGIN])
         .show(ctx, |ui| {
+            see_through(ui);
             glass().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
@@ -1136,6 +1169,7 @@ fn ticker(ctx: &egui::Context, race: &Race, watching: bool) {
     egui::Area::new("ticker".into())
         .anchor(corner, offset)
         .show(ctx, |ui| {
+            see_through(ui);
             // A fixed width so messages wrap into lines, not single letters.
             ui.set_width(300.0);
             // Three at most, so they stay clear of the panels below.
@@ -1186,6 +1220,7 @@ fn profile_strip(ctx: &egui::Context, race: &Race) {
     egui::Area::new("profile".into())
         .anchor(egui::Align2::RIGHT_BOTTOM, [-MARGIN, -MARGIN])
         .show(ctx, |ui| {
+            see_through(ui);
             glass().show(ui, |ui| {
                 let (rect, _) =
                     ui.allocate_exact_size(egui::vec2(width, 64.0), egui::Sense::hover());
@@ -1314,6 +1349,20 @@ fn name_tags(
             .length()
             .total_cmp(&(b.1 - cam_tf.translation()).length())
     });
+    // Remember where the rider followed is, for the panels to fade.
+    let focus = models
+        .iter()
+        .find(|(i, _)| *i == race.human)
+        .and_then(|&(_, at)| {
+            let feet = cam.world_to_viewport(cam_tf, at).ok()?;
+            let head = cam.world_to_viewport(cam_tf, at + Vec3::Y * 2.4).ok()?;
+            let h = (feet.y - head.y).abs().max(40.0);
+            Some(egui::Rect::from_center_size(
+                egui::pos2(feet.x, (feet.y + head.y) / 2.0),
+                egui::vec2(h * 1.4, h * 1.6),
+            ))
+        });
+    ctx.data_mut(|d| d.insert_temp(focus_id(), focus));
     if watching && let Some(&(_, at)) = models.iter().find(|(i, _)| *i == race.human) {
         tag(
             me.profile.name.clone(),

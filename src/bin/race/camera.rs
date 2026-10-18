@@ -54,7 +54,8 @@ impl View {
             Self::Chase => (Vec3::new(0.0, 2.6, 7.0), Vec3::new(0.0, 1.0, -6.0)),
             Self::Close => (Vec3::new(0.6, 1.7, 3.2), Vec3::new(0.0, 1.1, -3.0)),
             Self::Tv => (Vec3::new(9.0, 2.2, -2.0), Vec3::new(0.0, 1.0, -1.0)),
-            Self::Helicopter => (Vec3::new(-14.0, 22.0, 30.0), Vec3::new(0.0, 0.0, -18.0)),
+            // Aimed just ahead of the rider, so they sit mid-screen.
+            Self::Helicopter => (Vec3::new(-12.0, 22.0, 30.0), Vec3::new(-2.0, 0.0, -5.0)),
             Self::LookBack => (Vec3::new(0.4, 2.0, -6.0), Vec3::new(0.0, 1.0, 8.0)),
         }
     }
