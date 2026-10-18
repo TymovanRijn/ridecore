@@ -16,6 +16,7 @@ mod share;
 mod sound;
 mod theme;
 mod training;
+mod watch;
 mod world;
 
 use bevy::prelude::*;
@@ -53,6 +54,8 @@ pub struct RaceRes {
     pub best: Option<Ghost>,
     /// Set at the finish: whether this ride became your new best.
     pub new_best: Option<bool>,
+    /// Watching the bots race instead of riding.
+    pub watch: Option<watch::Watch>,
 }
 
 impl RaceRes {
@@ -66,7 +69,20 @@ impl RaceRes {
             xp: (0, 0, 0),
             best: best_ride(&race),
             new_best: None,
+            watch: None,
             race,
+        }
+    }
+
+    /// A race to watch: everyone is a bot, nothing is recorded.
+    pub fn watching(mut race: Race) -> Self {
+        race.spectate();
+        // A short countdown: there's nobody to get ready.
+        race.time = race.time.max(-3.0);
+        Self {
+            best: None,
+            watch: Some(watch::Watch::default()),
+            ..Self::new(race)
         }
     }
 }
@@ -150,6 +166,7 @@ fn main() {
             theme::ThemePlugin,
             captions::CaptionsPlugin,
             training::TrainingPlugin,
+            watch::WatchPlugin,
         ))
         .add_systems(
             Update,
@@ -182,6 +199,16 @@ pub fn advance_race(
     }
     let dt = time.delta_secs().min(0.1);
     let res = &mut *res;
+    if let Some(watch) = &res.watch {
+        // Nobody rides and nothing is recorded; the results come up a
+        // little after the winner crosses the line.
+        res.race.step(dt * watch.rate(), 0.0, 0.0);
+        let winner_in = res.race.finish.first().map(|f| res.race.time - f.time);
+        if *screen.get() == Screen::Racing && winner_in.is_some_and(|s| s > 8.0) {
+            next.set(Screen::Results);
+        }
+        return;
+    }
     res.race.step(dt, power.power, power.cadence);
 
     let player = res.race.player();
@@ -323,8 +350,19 @@ fn screenshots(
         (16.0, camera::View::Helicopter),
         (20.0, camera::View::LookBack),
     ];
-    if let Some(&(at, view)) = PLAN.get(*taken) {
-        if res.race.time >= at - 2.0 {
+    // Watching, the director picks the views and `RIDECORE_SHOT_EVERY=<s>`
+    // spreads the shots over the race.
+    let every = std::env::var("RIDECORE_SHOT_EVERY")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok());
+    let plan = |k: usize| match every {
+        Some(e) if res.watch.is_some() => (k < PLAN.len()).then(|| ((k + 1) as f32 * e, None)),
+        _ => PLAN.get(k).map(|&(at, view)| (at, Some(view))),
+    };
+    if let Some((at, view)) = plan(*taken) {
+        if let Some(view) = view
+            && res.race.time >= at - 2.0
+        {
             rig.view = view;
         }
         if res.race.time >= at {
@@ -332,7 +370,11 @@ fn screenshots(
             commands.spawn(shot()).observe(save_to_disk(path));
             *taken += 1;
         }
-    } else if res.race.time > PLAN[PLAN.len() - 1].0 + 3.0 {
+    } else if res.race.time
+        > plan(PLAN.len() - 1).map_or(0.0, |(at, _)| at)
+            // Fast-forwarding, the last shot needs more race time to save.
+            + res.watch.as_ref().map_or(3.0, |w| 3.0 * w.rate())
+    {
         report_frames(&frames);
         exit.write(AppExit::Success);
     }

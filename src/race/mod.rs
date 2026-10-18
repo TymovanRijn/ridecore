@@ -169,7 +169,11 @@ pub struct Race {
     /// Per course segment: rider indices in crossing order.
     pub segment_results: Vec<Vec<usize>>,
     pub finish: Vec<FinishLine>,
+    /// The player's rider; when spectating, the rider being watched.
     pub human: usize,
+    /// Nobody rides: every rider is a bot and `human` only says who the
+    /// camera follows (see [`Race::spectate`]).
+    pub spectating: bool,
     rng: Rng,
     ai_timer: f32,
     pub(crate) director_timer: f32,
@@ -181,7 +185,16 @@ pub struct Race {
     pub(crate) last_attack: f32,
     /// Rivals marking the player's last attack stay on it until then.
     pub(crate) player_marked_until: f32,
+    /// Speed the bunch rolls out at in the neutral start, m/s.
+    pub(crate) neutral_mps: f32,
 }
+
+/// The neutral start: for this long the bots roll out together, all
+/// speeding up alike, so the grid leaves as one bunch instead of the front
+/// row riding clear of riders boxed in behind it.
+pub const NEUTRAL_S: f32 = 15.0;
+/// How quickly the bunch speeds up in the neutral start, m/s².
+pub const NEUTRAL_ACCEL: f32 = 0.6;
 
 /// Spread of a rider's threshold on the day, as a share of it.
 pub const DAY_FORM_SD: f32 = 0.025;
@@ -265,6 +278,13 @@ impl Race {
         }
 
         place_on_grid(&mut riders, &mut rng);
+        // Rolling out at a pace the weakest rider holds easily.
+        let start_grade = course.grade_pct_at(0.0) / 100.0;
+        let neutral_mps = riders
+            .iter()
+            .map(|r| r.bike.steady_speed(0.75 * r.profile.ftp, start_grade))
+            .fold(f32::MAX, f32::min)
+            .min(NEUTRAL_ACCEL * NEUTRAL_S);
         let segment_results = vec![Vec::new(); course.segments.len()];
         let mut race = Self {
             course,
@@ -276,6 +296,7 @@ impl Race {
             segment_results,
             finish: Vec::new(),
             human,
+            spectating: false,
             rng,
             ai_timer: 0.0,
             director_timer: 0.0,
@@ -283,9 +304,38 @@ impl Race {
             last_catch: -1_000.0,
             last_attack: -1_000.0,
             player_marked_until: -1_000.0,
+            neutral_mps,
         };
         race.groups = pack::find_groups(&race.riders);
         race
+    }
+
+    /// Turns the race into one to watch: a bot takes the player's place and
+    /// races for their team like everyone else, and `human` becomes the rider
+    /// being watched, which [`Race::watch`] moves around the field.
+    pub fn spectate(&mut self) {
+        self.spectating = true;
+        let h = self.human;
+        let t = self.riders[h].team;
+        // A rider of the same kind takes the player's place.
+        let profile = field::sample_rider(
+            &mut self.rng,
+            &self.teams[t].spec,
+            self.riders[h].profile.kind,
+        );
+        let r = &mut self.riders[h];
+        r.human = false;
+        r.bike = profile.bike();
+        r.energy = profile.energy();
+        r.profile = profile;
+        self.teams[t].human = false;
+    }
+
+    /// Follows another rider while spectating.
+    pub fn watch(&mut self, rider: usize) {
+        if self.spectating && rider < self.riders.len() {
+            self.human = rider;
+        }
     }
 
     pub fn player(&self) -> &Rider {
@@ -308,8 +358,16 @@ impl Race {
         self.time >= 0.0
     }
 
-    /// Everyone has crossed the line, or the player finished long ago.
+    /// Everyone has crossed the line, or the player (when spectating, the
+    /// winner) finished long ago.
     pub fn over(&self) -> bool {
+        if self.spectating {
+            let winner_long_in = self
+                .finish
+                .first()
+                .is_some_and(|f| self.time - f.time > 180.0);
+            return self.riders.iter().all(Rider::finished) || winner_long_in;
+        }
         let player_done = self.riders[self.human]
             .finish_time
             .is_some_and(|t| self.time - t > 180.0);

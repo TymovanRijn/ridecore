@@ -803,7 +803,11 @@ fn player_attack(race: &mut Race, sit: &Situation) {
     let Some(group) = race.groups.get(sit.group_of[h]) else {
         return;
     };
-    if p.finished() || race.time < race.player_marked_until || group.riders.first() != Some(&h) {
+    if !p.human
+        || p.finished()
+        || race.time < race.player_marked_until
+        || group.riders.first() != Some(&h)
+    {
         return;
     }
     let grade = race.course.grade_pct_at(p.dist) / 100.0;
@@ -1056,6 +1060,11 @@ pub fn power(race: &Race, i: usize, wheel: Option<usize>, ahead: Option<usize>) 
     let ftp = r.profile.ftp;
     let grade = race.course.grade_pct_at(r.dist) / 100.0;
     let follow = |w: usize| hold_wheel(r, &race.riders[w], grade);
+    // The neutral start: everyone rolls out alike, keeping their place.
+    if race.time < super::NEUTRAL_S && r.intent == Intent::Sit {
+        let v = (race.time * super::NEUTRAL_ACCEL).min(race.neutral_mps);
+        return required_power(r, v, grade).min(1.5 * ftp);
+    }
     let tempo = race
         .groups
         .iter()

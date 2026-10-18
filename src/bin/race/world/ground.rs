@@ -187,8 +187,8 @@ pub fn verges(index: &RoadIndex, course: &Course, rng: &mut Rng) -> (Blades, Tri
             // Mostly close to the road, some further out.
             let lateral = 5.2 + rng.f32().powi(3) * 30.0;
             let (p, _) = pose_v(course, d + rng.range(-0.5, 0.5) as f64, side * lateral);
-            let n = index.near(p.x, p.z);
-            let y = index.height_near(&n, p.x, p.z);
+            // On the ground as drawn, which dips under the road at cuts.
+            let y = index.surface(p.x, p.z);
             if y < index.water_level + 0.6 || y > SNOW_LINE_M - 60.0 {
                 continue;
             }

@@ -386,7 +386,8 @@ fn control_trainer(
     trainer.shift_pending = false;
     let race = &res.race;
     let me = race.player();
-    let target = if race.started() && !res.paused {
+    // Watching a race: the trainer stays flat.
+    let target = if race.started() && !res.paused && res.watch.is_none() {
         let lookahead = trainer.controller.tuning.grade_lookahead_s;
         let road = race
             .course

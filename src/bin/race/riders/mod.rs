@@ -423,7 +423,7 @@ fn spawn_body(
 
 /// World pose of a rider: on the road, pitched with the grade. Before the
 /// start of a point-to-point course the grid extends back along the road.
-fn rider_transform(race: &Race, dist: f64, lateral: f32) -> Transform {
+pub fn rider_transform(race: &Race, dist: f64, lateral: f32) -> Transform {
     let course = &race.course;
     let (d, back) = if !course.route.looped && dist < 0.0 {
         (0.0, -dist as f32)

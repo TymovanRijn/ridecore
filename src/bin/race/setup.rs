@@ -390,7 +390,12 @@ fn autostart(
             r.dist += skip * 1000.0;
         }
     }
-    commands.insert_resource(RaceRes::new(race));
+    // `RIDECORE_WATCH=1` watches the race instead of riding it.
+    commands.insert_resource(if std::env::var_os("RIDECORE_WATCH").is_some() {
+        RaceRes::watching(race)
+    } else {
+        RaceRes::new(race)
+    });
     next.set(Screen::Racing);
 }
 
@@ -507,10 +512,14 @@ fn setup_ui(
                     .max_height((height - START_CARD_H).max(200.0))
                     .show(ui, |ui| field_card(ui, &mut form));
                 let can_start = settings.keyboard || trainer.name.is_some();
-                if start_card(ui, &form, can_start, t) {
+                if let Some(start) = start_card(ui, &form, can_start, t) {
                     form.save_profile();
                     commands.remove_resource::<crate::training::Session>();
-                    commands.insert_resource(RaceRes::new(Race::new(&form.config())));
+                    let race = Race::new(&form.config());
+                    commands.insert_resource(match start {
+                        Start::Ride => RaceRes::new(race),
+                        Start::Watch => RaceRes::watching(race),
+                    });
                     next.set(Screen::Racing);
                 }
             },
@@ -520,7 +529,7 @@ fn setup_ui(
 }
 
 /// Room kept for the start card under the field.
-const START_CARD_H: f32 = 240.0;
+const START_CARD_H: f32 = 280.0;
 
 fn column(ui: &mut egui::Ui, id: &str, width: f32, height: f32, body: impl FnOnce(&mut egui::Ui)) {
     // Columns stack top-down; inheriting the row's left-to-right layout
@@ -1195,8 +1204,15 @@ fn field_card(ui: &mut egui::Ui, form: &mut SetupForm) {
     });
 }
 
-/// Race summary and the big start button. Returns true when pressed.
-fn start_card(ui: &mut egui::Ui, form: &SetupForm, can_start: bool, t: f32) -> bool {
+enum Start {
+    Ride,
+    /// Sit back and watch the bots race it.
+    Watch,
+}
+
+/// Race summary, the big start button and one to watch the race instead
+/// (no trainer needed). Returns the one pressed.
+fn start_card(ui: &mut egui::Ui, form: &SetupForm, can_start: bool, t: f32) -> Option<Start> {
     let route = &form.routes[form.route];
     let laps = if route.looped { form.laps } else { 1 };
     let km = route.length_m() / 1000.0 * laps as f64;
@@ -1215,7 +1231,28 @@ fn start_card(ui: &mut egui::Ui, form: &SetupForm, can_start: bool, t: f32) -> b
             stat(ui, riders.to_string(), i18n::t("renners", "riders"), TEXT);
         });
         ui.add_space(8.0);
-        start_button_inner(ui, i18n::t("START WEDSTRIJD", "START RACE"), can_start, t)
+        let ride = start_button_inner(ui, i18n::t("START WEDSTRIJD", "START RACE"), can_start, t);
+        ui.add_space(6.0);
+        let watch = ui
+            .add_sized(
+                [ui.available_width(), 32.0],
+                egui::Button::new(
+                    egui::RichText::new(i18n::t("▶  Bekijk deze koers", "▶  Watch this race"))
+                        .size(17.0),
+                ),
+            )
+            .on_hover_text(i18n::t(
+                "Leun achterover: de bots rijden de koers, de camera volgt de actie",
+                "Sit back: the bots race it and the camera follows the action",
+            ))
+            .clicked();
+        if ride {
+            Some(Start::Ride)
+        } else if watch {
+            Some(Start::Watch)
+        } else {
+            None
+        }
     })
 }
 

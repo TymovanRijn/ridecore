@@ -41,6 +41,8 @@ const ROAD_HALF: f32 = 4.6;
 const ROAD_LIFT: f32 = 0.12;
 const SAMPLE_M: f64 = 4.0;
 const CELL_M: f32 = 16.0;
+/// The ground under and beside the road sits this far below its surface.
+const GROUND_BELOW_ROAD: f32 = 0.35;
 /// Scenery is cut into tiles this big for culling.
 const TILE_M: f32 = 220.0;
 const MARGIN_M: f32 = 380.0;
@@ -128,6 +130,31 @@ struct RoadIndex {
     zones: ZoneMap,
     /// Real terrain for routes built from map data.
     geo: Option<Arc<Geo>>,
+    /// Highest a terrain corner may be, for corners of cells the road runs
+    /// through (see [`road_caps`]).
+    caps: std::collections::HashMap<(i32, i32), f32>,
+}
+
+/// Terrain corners are `CELL_M` apart, so a triangle across a hairpin or a
+/// road cut into a hillside can rise through the road and bury the riders.
+/// Every corner of a cell the road crosses is kept just below the road's
+/// lowest point in that cell: a triangle never rises above its corners, so
+/// the ground can't cover the road.
+fn road_caps(pts: &[RoadPoint]) -> std::collections::HashMap<(i32, i32), f32> {
+    let mut caps: std::collections::HashMap<(i32, i32), f32> = Default::default();
+    for p in pts {
+        let right = Vec3::new(-p.dir.z, 0.0, p.dir.x);
+        let cap = p.pos.y - GROUND_BELOW_ROAD;
+        for k in -4..=4 {
+            let q = p.pos + right * ((ROAD_HALF + 0.5) * k as f32 / 4.0);
+            let (i, j) = ((q.x / CELL_M).floor() as i32, (q.z / CELL_M).floor() as i32);
+            for corner in [(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)] {
+                let c = caps.entry(corner).or_insert(f32::MAX);
+                *c = c.min(cap);
+            }
+        }
+    }
+    caps
 }
 
 impl RoadIndex {
@@ -145,6 +172,7 @@ impl RoadIndex {
         }
         let mean_elevation = pts.iter().map(|p| p.pos.y).sum::<f32>() / pts.len() as f32;
         let min_elevation = pts.iter().map(|p| p.pos.y).fold(f32::MAX, f32::min);
+        let caps = road_caps(&pts);
         Self {
             pts,
             cells,
@@ -158,7 +186,14 @@ impl RoadIndex {
             },
             zones,
             geo,
+            caps,
         }
+    }
+
+    /// Height of the terrain mesh's corner `(i, j)` (at `CELL_M` steps).
+    fn corner_height(&self, i: i32, j: i32) -> f32 {
+        let h = self.height(i as f32 * CELL_M, j as f32 * CELL_M);
+        self.caps.get(&(i, j)).map_or(h, |&cap| h.min(cap))
     }
 
     /// Nearest road point within ~150 m (beyond that: treated as distant).
@@ -222,15 +257,12 @@ impl RoadIndex {
     }
 
     /// Height of the ground as drawn: the terrain mesh's triangles between
-    /// its 16 m corners (real routes), so things stand on what you see.
+    /// its 16 m corners, so things stand on what you see.
     fn surface(&self, x: f32, z: f32) -> f32 {
-        if self.geo.is_none() {
-            return self.height(x, z);
-        }
         let (fx, fz) = (x / CELL_M, z / CELL_M);
         let (i, j) = (fx.floor(), fz.floor());
         let (tx, tz) = (fx - i, fz - j);
-        let h = |di: f32, dj: f32| self.height((i + di) * CELL_M, (j + dj) * CELL_M);
+        let h = |di: f32, dj: f32| self.corner_height(i as i32 + di as i32, j as i32 + dj as i32);
         let (a, c) = (h(0.0, 0.0), h(1.0, 1.0));
         // Cells are split along the a–c diagonal, as in the mesh.
         if tz > tx {
@@ -245,7 +277,7 @@ impl RoadIndex {
     fn height_near(&self, n: &Near, x: f32, z: f32) -> f32 {
         let d = n.dist.min(400.0);
         if d < 6.5 {
-            return n.road_elevation - 0.35;
+            return n.road_elevation - GROUND_BELOW_ROAD;
         }
         // Real terrain, eased into the road surface beside the road.
         if let Some(geo) = self.geo.as_ref()
@@ -256,7 +288,7 @@ impl RoadIndex {
                 Some(m) if d > 14.0 && m.cover(x, z) == Cover::Water => dem - 2.5,
                 _ => dem,
             };
-            let road = n.road_elevation - 0.35;
+            let road = n.road_elevation - GROUND_BELOW_ROAD;
             return road + (dem - road) * smoothstep(8.0, 60.0, d);
         }
         // Far from the road, blend towards the course's mean height.
@@ -269,7 +301,7 @@ impl RoadIndex {
         };
         let hills = (fbm(x / 380.0, z / 380.0) * 48.0 + fbm(x / 70.0 + 13.0, z / 70.0 - 7.0) * 4.0)
             * amplitude;
-        let h = base - 0.35 + hills * smoothstep(7.0, 95.0, d);
+        let h = base - GROUND_BELOW_ROAD + hills * smoothstep(7.0, 95.0, d);
         // Lakes lie to the right of the road in lake stretches.
         if n.zone == Zone::Lake && n.lateral > 0.0 && n.dist < 400.0 {
             let k = smoothstep(18.0, 48.0, n.lateral);
@@ -785,8 +817,10 @@ fn generated_terrain(index: &RoadIndex) -> (Grid, (Vec2, Vec2)) {
         min = min.min(Vec2::new(p.pos.x, p.pos.z));
         max = max.max(Vec2::new(p.pos.x, p.pos.z));
     }
-    min -= Vec2::splat(MARGIN_M);
+    // On the global CELL_M grid, like the corners' height caps.
+    min = ((min - Vec2::splat(MARGIN_M)) / CELL_M).floor() * CELL_M;
     max += Vec2::splat(MARGIN_M);
+    let (i0, j0) = ((min.x / CELL_M) as i32, (min.y / CELL_M) as i32);
     let (nx, nz) = (
         ((max.x - min.x) / CELL_M) as i32,
         ((max.y - min.y) / CELL_M) as i32,
@@ -795,7 +829,7 @@ fn generated_terrain(index: &RoadIndex) -> (Grid, (Vec2, Vec2)) {
     let corner = |g: &mut Grid, i: i32, j: i32| {
         g.corner((i, j), || {
             let (x, z) = (min.x + i as f32 * CELL_M, min.y + j as f32 * CELL_M);
-            Vec3::new(x, index.height(x, z), z)
+            Vec3::new(x, index.corner_height(i0 + i, j0 + j), z)
         })
     };
     for j in 0..nz {
@@ -832,7 +866,7 @@ fn real_terrain(index: &RoadIndex, geo: &Geo) -> (Grid, Grid, (Vec2, Vec2)) {
     let corner = |g: &mut Grid, i: i32, j: i32| {
         g.corner((i, j), || {
             let (x, z) = (i as f32 * CELL_M, j as f32 * CELL_M);
-            Vec3::new(x, index.height(x, z), z)
+            Vec3::new(x, index.corner_height(i, j), z)
         })
     };
     let (mut min, mut max) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
@@ -1655,6 +1689,47 @@ mod tests {
                     ground < surface && surface - ground < 0.9,
                     "{id}: ground {ground} road surface {surface}"
                 );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod ground_tests {
+    use super::*;
+    use ridecore::route::{Route, real_routes};
+
+    /// Riders ride up to `ROAD_HALF_WIDTH` either side of the middle; the
+    /// drawn ground must stay under the road wherever they can be.
+    #[test]
+    fn the_ground_never_covers_the_road() {
+        for route in Route::builtin()
+            .into_iter()
+            .chain(real_routes().iter().cloned())
+        {
+            let course = Course::new(route.clone(), 1);
+            let center = lap_samples(&course)
+                .iter()
+                .map(|&d| {
+                    let (pos, dir) = pose_v(&course, d, 0.0);
+                    RoadPoint { pos, dir, d }
+                })
+                .collect();
+            let zones = ZoneMap::new(&course, 7, route.geo.is_none());
+            let index = RoadIndex::new(center, zones, route.geo.clone());
+            let half = ridecore::race::ROAD_HALF_WIDTH;
+            let mut d = 0.0;
+            while d < course.route.length_m() {
+                for k in -4..=4 {
+                    let (p, _) = pose_v(&course, d, half * k as f32 / 4.0);
+                    let over = index.surface(p.x, p.z) - (p.y + ROAD_LIFT);
+                    assert!(
+                        over < 0.0,
+                        "{}: ground {over:.2} m over the road at {d:.0} m",
+                        route.id
+                    );
+                }
+                d += 1.0;
             }
         }
     }

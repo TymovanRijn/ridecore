@@ -66,13 +66,15 @@ impl Plugin for FeedbackPlugin {
                 detect_moments
                     .after(crate::advance_race)
                     .run_if(in_state(Screen::Racing))
-                    .run_if(crate::training::racing),
+                    .run_if(crate::training::racing)
+                    .run_if(crate::watch::riding),
             )
             .add_systems(
                 EguiPrimaryContextPass,
                 draw_feedback
                     .run_if(in_state(Screen::Racing))
                     .run_if(crate::training::racing)
+                    .run_if(crate::watch::riding)
                     .run_if(crate::theme::ready),
             );
     }
@@ -283,7 +285,8 @@ fn draw_feedback(
     // The live objective, under the race clock.
     if let Some(o) = race.objective() {
         egui::Area::new("objective".into())
-            .anchor(egui::Align2::CENTER_TOP, [0.0, 118.0])
+            // Under the race strip.
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 196.0])
             .show(ctx, |ui| {
                 let pulse = if o.urgent {
                     0.75 + 0.25 * (t * 8.0).sin().abs()
@@ -295,11 +298,8 @@ fn draw_feedback(
                 } else {
                     egui::Color32::from_rgb(255, 140, 0)
                 };
-                egui::Frame::new()
-                    .fill(egui::Color32::from_rgba_premultiplied(12, 14, 20, 236))
-                    .stroke(egui::Stroke::new(2.0, accent))
-                    .corner_radius(10.0)
-                    .inner_margin(egui::Margin::symmetric(16, 10))
+                crate::hud::glass()
+                    .stroke(egui::Stroke::new(1.5, accent))
                     .show(ui, |ui| {
                         // A fixed width so the text can't collapse to one
                         // letter per line.
@@ -311,9 +311,8 @@ fn draw_feedback(
                                 22.0
                             };
                             ui.label(
-                                egui::RichText::new(&o.title)
-                                    .size(size)
-                                    .strong()
+                                egui::RichText::new(o.title.to_uppercase())
+                                    .font(crate::theme::display(size))
                                     .color(accent),
                             );
                             ui.label(
@@ -339,71 +338,62 @@ fn draw_feedback(
         .show(ctx, |ui| {
             let ch = &fb.challenges;
             let pop = 1.0 + 0.4 * (1.0 - ((now - fb.xp_at) as f32 / 0.5).clamp(0.0, 1.0));
-            egui::Frame::new()
-                .fill(egui::Color32::from_rgba_premultiplied(12, 14, 20, 236))
-                .corner_radius(10.0)
-                .inner_margin(egui::Margin::symmetric(14, 10))
-                .show(ui, |ui| {
-                    ui.set_width(250.0);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!("{} XP", ch.xp))
-                                .size(22.0 * pop)
-                                .strong()
-                                .color(GOLD),
-                        );
-                        if ch.streak > 0 {
-                            ui.label(
-                                egui::RichText::new(tf!(
-                                    "reeks x{:.1}",
-                                    "streak x{:.1}",
-                                    ch.multiplier()
-                                ))
-                                .color(GOOD),
-                            );
-                        }
-                    });
-                    if let Some(c) = &ch.active {
-                        let attack = c.title.starts_with("AANVAL") || c.title.starts_with("ATTACK");
-                        let accent = if attack {
-                            BAD.gamma_multiply(0.75 + 0.25 * (t * 8.0).sin().abs())
-                        } else {
-                            INFO
-                        };
-                        ui.label(
-                            egui::RichText::new(&c.title)
-                                .size(18.0)
-                                .strong()
-                                .color(accent),
-                        );
-                        ui.label(egui::RichText::new(&c.detail).color(egui::Color32::LIGHT_GRAY));
-                        ui.add(
-                            egui::ProgressBar::new(c.progress)
-                                .desired_width(250.0)
-                                .desired_height(8.0)
-                                .fill(accent),
-                        );
+            crate::hud::glass().show(ui, |ui| {
+                ui.set_width(250.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{} XP", ch.xp))
+                            .font(crate::theme::display(26.0 * pop))
+                            .color(GOLD),
+                    );
+                    if ch.streak > 0 {
                         ui.label(
                             egui::RichText::new(tf!(
-                                "nog {:.0} s · +{:.0} XP",
-                                "{:.0} s left · +{:.0} XP",
-                                c.time_left.max(0.0),
-                                c.xp as f32 * ch.multiplier()
+                                "reeks x{:.1}",
+                                "streak x{:.1}",
+                                ch.multiplier()
                             ))
-                            .weak(),
-                        );
-                    } else {
-                        ui.label(
-                            egui::RichText::new(tf!(
-                                "Uitdagingen {}/{}",
-                                "Challenges {}/{}",
-                                ch.completed,
-                                ch.attempted
-                            ))
-                            .weak(),
+                            .color(GOOD),
                         );
                     }
                 });
+                if let Some(c) = &ch.active {
+                    let attack = c.title.starts_with("AANVAL") || c.title.starts_with("ATTACK");
+                    let accent = if attack {
+                        BAD.gamma_multiply(0.75 + 0.25 * (t * 8.0).sin().abs())
+                    } else {
+                        INFO
+                    };
+                    ui.label(
+                        egui::RichText::new(c.title.to_uppercase())
+                            .font(crate::theme::display(20.0))
+                            .color(accent),
+                    );
+                    ui.label(egui::RichText::new(&c.detail).color(egui::Color32::LIGHT_GRAY));
+                    ui.add(
+                        egui::ProgressBar::new(c.progress)
+                            .desired_width(250.0)
+                            .desired_height(8.0)
+                            .fill(accent),
+                    );
+                    ui.label(
+                        egui::RichText::new(tf!(
+                            "nog {:.0} s · +{:.0} XP",
+                            "{:.0} s left · +{:.0} XP",
+                            c.time_left.max(0.0),
+                            c.xp as f32 * ch.multiplier()
+                        ))
+                        .weak(),
+                    );
+                } else {
+                    ui.label(crate::hud::caps(&tf!(
+                        "Uitdagingen {}/{}",
+                        "Challenges {}/{}",
+                        ch.completed,
+                        ch.attempted
+                    )));
+                }
+            });
         });
 
     // Toasts: pop in, hold, fade out.

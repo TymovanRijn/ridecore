@@ -409,3 +409,42 @@ fn the_player_gets_into_the_wheel_without_steering() {
         share * 100.0
     );
 }
+
+#[test]
+fn a_spectated_race_is_raced_by_bots_alone() {
+    let mut race = Race::new(&config(5, 0, 1, 4));
+    race.spectate();
+    let slot = race.human;
+    // The power passed in is ignored: nobody is riding.
+    while !race.over() && race.time < 3600.0 {
+        race.step(1.0, 0.0, 0.0);
+        if let Some(&front) = race.groups.first().and_then(|g| g.riders.first()) {
+            race.watch(front);
+        }
+    }
+    assert!(race.riders.iter().all(|r| !r.human));
+    assert!(race.over(), "the race never ended");
+    assert!(
+        race.riders[slot].finished(),
+        "the player's slot didn't race"
+    );
+    let kmh = race.course.total_m as f32 / race.finish[0].time * 3.6;
+    assert!((36.0..52.0).contains(&kmh), "winning speed {kmh} km/h");
+}
+
+#[test]
+fn the_bunch_rolls_out_together() {
+    for seed in 0..4 {
+        let mut race = Race::new(&config(seed, 0, 1, 8));
+        race.spectate();
+        while race.time < 30.0 {
+            race.step(0.1, 0.0, 0.0);
+            assert_eq!(
+                race.groups.len(),
+                1,
+                "seed {seed}: the grid split at {:.1} s",
+                race.time
+            );
+        }
+    }
+}

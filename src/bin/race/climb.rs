@@ -48,30 +48,28 @@ fn climb_panel(mut contexts: EguiContexts, res: Res<RaceRes>) -> Result {
     let screen = ctx.content_rect();
     let width = (screen.width() * 0.42).min(700.0);
     egui::Area::new("climbpro".into())
-        .anchor(egui::Align2::RIGHT_BOTTOM, [-16.0, -122.0])
+        // Just above the course profile.
+        .anchor(egui::Align2::RIGHT_BOTTOM, [-16.0, -126.0])
         .interactable(false)
         .show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(egui::Color32::from_rgba_premultiplied(12, 14, 20, 242))
-                .corner_radius(10.0)
-                .inner_margin(egui::Margin::symmetric(14, 10))
-                .show(ui, |ui| {
-                    ui.set_width(width);
-                    header(ui, race, climb, index, d);
-                    profile(ui, race, climb, d, width);
-                });
+            crate::hud::glass().show(ui, |ui| {
+                ui.set_width(width);
+                header(ui, race, climb, index, d);
+                profile(ui, race, climb, d, width);
+            });
         });
     Ok(())
 }
 
 fn stat(ui: &mut egui::Ui, value: String, label: &str, color: egui::Color32) {
     ui.vertical(|ui| {
-        ui.label(egui::RichText::new(value).size(24.0).strong().color(color));
+        ui.spacing_mut().item_spacing.y = 0.0;
         ui.label(
-            egui::RichText::new(label)
-                .small()
-                .color(egui::Color32::GRAY),
+            egui::RichText::new(value)
+                .font(crate::theme::display(28.0))
+                .color(color),
         );
+        ui.label(crate::hud::caps(label));
     });
 }
 
@@ -93,11 +91,7 @@ fn header(ui: &mut egui::Ui, race: &ridecore::race::Race, climb: &Climb, index: 
         climb.avg_pct,
         climb.gain_m
     );
-    ui.label(
-        egui::RichText::new(title)
-            .strong()
-            .color(egui::Color32::WHITE),
-    );
+    ui.label(crate::hud::caps(&title).color(egui::Color32::WHITE));
     if d < climb.start_m {
         ui.horizontal(|ui| {
             stat(

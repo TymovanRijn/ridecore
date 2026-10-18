@@ -118,7 +118,19 @@ fn results_ui(
         .resizable(false)
         .default_width(900.0)
         .show(ctx, |ui| {
-            if let Some(p) = race.finish.iter().position(|f| f.rider == race.human) {
+            let watched = res.watch.is_some();
+            if watched && let Some(first) = race.finish.first() {
+                let winner = &race.riders[first.rider];
+                ui.heading(
+                    egui::RichText::new(tf!(
+                        "{} wint · {}",
+                        "{} wins · {}",
+                        winner.profile.name,
+                        race.teams[winner.team].spec.name
+                    ))
+                    .size(26.0),
+                );
+            } else if let Some(p) = race.finish.iter().position(|f| f.rider == race.human) {
                 let f = &race.finish[p];
                 ui.heading(
                     egui::RichText::new(tf!(
@@ -135,16 +147,18 @@ fn results_ui(
                 ui.label(line);
             }
             let (xp, done, tried) = res.xp;
-            ui.label(
-                egui::RichText::new(tf!(
-                    "{xp} XP · {done} van {tried} uitdagingen gehaald",
-                    "{xp} XP · {done} of {tried} challenges completed"
-                ))
-                .size(20.0)
-                .strong()
-                .color(egui::Color32::from_rgb(255, 200, 40)),
-            );
-            share_panel(ui, &res, &mut strava);
+            if !watched {
+                ui.label(
+                    egui::RichText::new(tf!(
+                        "{xp} XP · {done} van {tried} uitdagingen gehaald",
+                        "{xp} XP · {done} of {tried} challenges completed"
+                    ))
+                    .size(20.0)
+                    .strong()
+                    .color(egui::Color32::from_rgb(255, 200, 40)),
+                );
+                share_panel(ui, &res, &mut strava);
+            }
             ui.add_space(8.0);
             ui.columns(2, |cols| {
                 cols[0].strong(t("Einduitslag", "Final classification"));
@@ -219,13 +233,15 @@ fn results_ui(
                 {
                     next.set(Screen::Setup);
                 }
-                ui.label(
-                    egui::RichText::new(t(
-                        "Je kunt uitfietsen terwijl de rest binnenkomt.",
-                        "You can cool down while the others come in.",
-                    ))
-                    .weak(),
-                );
+                if !watched {
+                    ui.label(
+                        egui::RichText::new(t(
+                            "Je kunt uitfietsen terwijl de rest binnenkomt.",
+                            "You can cool down while the others come in.",
+                        ))
+                        .weak(),
+                    );
+                }
             });
         });
     Ok(())
