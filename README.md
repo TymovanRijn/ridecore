@@ -75,7 +75,7 @@ tools/          scripts that build the routes, the map data and the macOS app
 
 - Map and road data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, available under the ODbL.
 - Elevation: EU-DEM v1.1 © European Union, Copernicus. Terrain tiles by Mapzen/Tilezen on AWS Open Data.
-- Fonts: Barlow and Barlow Condensed © The Barlow Project Authors, under the SIL Open Font License (`assets/fonts/OFL.txt`).
+- Fonts: Lilita One © Juan Montoreano and Varela Round © The Varela Round Project Authors, both under the SIL Open Font License (`assets/fonts/OFL-*.txt`).
 - The Zwift Click and trainer message formats were documented by the open-source projects [incyclist/devices](https://github.com/incyclist/devices) and [qdomyos-zwift](https://github.com/cagnulein/qdomyos-zwift).
 
 RideCore is an independent hobby project. It is **not affiliated with, endorsed by or connected to Zwift, Wahoo or Strava**. Product names are used only to describe compatibility.

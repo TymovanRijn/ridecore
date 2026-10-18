@@ -23,6 +23,9 @@ pub const DRAFT_MAX: f32 = 0.6;
 pub const MIN_GAP_M: f32 = 1.8;
 /// Riders closer than this laterally are in the same line.
 const BODY_WIDTH_M: f32 = 0.6;
+/// How much faster than the wheel ahead a rider jumping away squeezes
+/// through a gap, m/s.
+const SQUEEZE_MPS: f32 = 1.0;
 /// Lateral steering speed in m/s.
 const STEER_SPEED: f32 = 1.2;
 /// A gap of more than this many seconds splits groups.
@@ -266,7 +269,17 @@ pub fn steer(race: &mut Race, wheels: &[Option<usize>], h: f32) {
 /// same line can't go faster than it and is eased sideways towards open
 /// road, so it can come past. The player passes through, as in Zwift, so
 /// their power is never wasted, and so do riders moving up in the finale,
-/// which stands for coming up the side of a bunch filling the road.
+/// which stands for coming up the side of a bunch filling the road. A rider
+/// jumping away (attacking, sprinting or going with an attack) squeezes
+/// through: held up a little while finding a gap, never stuck behind a
+/// slower wheel.
+fn jumping(r: &Rider) -> bool {
+    matches!(
+        r.intent,
+        Intent::Attack { .. } | Intent::Sprint { .. } | Intent::Mark { .. }
+    )
+}
+
 pub fn separate(riders: &mut [Rider], h: f32) {
     let mut order: Vec<usize> = (0..riders.len()).collect();
     order.sort_by(|&a, &b| riders[b].dist.total_cmp(&riders[a].dist));
@@ -286,7 +299,12 @@ pub fn separate(riders: &mut [Rider], h: f32) {
             }
             let dy = riders[back].lateral - riders[front].lateral;
             if dy.abs() < BODY_WIDTH_M {
-                riders[back].speed = riders[back].speed.min(riders[front].speed);
+                let squeeze = if jumping(&riders[back]) {
+                    SQUEEZE_MPS
+                } else {
+                    0.0
+                };
+                riders[back].speed = riders[back].speed.min(riders[front].speed + squeeze);
                 let away = if dy.abs() > 0.01 {
                     dy.signum()
                 } else if riders[back].lateral < 0.0 {
@@ -443,5 +461,20 @@ mod tests {
         assert_eq!(rs[1].speed, 11.0);
         assert_eq!(rs[1].dist, 99.0, "no teleporting");
         assert!(rs[1].lateral > 0.1, "eased towards open road");
+    }
+
+    #[test]
+    fn an_attacker_squeezes_past_the_wheel_in_front() {
+        let mut rs = vec![rider(0, 100.0, 0.0), rider(1, 99.0, 0.1)];
+        rs[1].speed = 13.0;
+        rs[1].intent = Intent::Attack {
+            intensity: 1.4,
+            until: 60.0,
+        };
+        separate(&mut rs, 0.1);
+        assert_eq!(
+            rs[1].speed, 12.0,
+            "squeezes past instead of riding into the wheel"
+        );
     }
 }

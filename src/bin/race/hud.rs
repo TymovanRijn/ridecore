@@ -1,8 +1,9 @@
-//! In-race overlay, styled like a race broadcast: translucent panels, small
-//! spaced capitals for labels and big condensed numbers.
+//! In-race overlay, cartoony like the 3D world: indigo sticker panels
+//! with a thick edge and a hard drop shadow, chunky numbers with a shadow
+//! under them, yellow labels and fat rounded bars and buttons.
 //!
 //! Riding: your numbers in a bar at the top with the race clock under it,
-//! your energy and shelter, the race situation, team orders, the course
+//! your reserve and shelter, the race situation, team orders, the course
 //! profile, the news and name tags. Watching: a live bar, a card for the
 //! rider you follow, the whole field in race order (click a rider to
 //! follow them) and the playback controls.
@@ -20,7 +21,9 @@ use ridecore::tf;
 use crate::camera::CameraRig;
 use crate::link::{InputSettings, PlayerInput, Trainer};
 use crate::riders::{GhostRider, RiderModel};
-use crate::theme::{ACCENT, GOOD, MUTED, TEXT, display};
+use crate::theme::{
+    ACCENT, BAD, CARD, CARD_EDGE, GOOD, INK, LABEL, MUTED, TEXT, bold, display, drop_shadow,
+};
 use crate::watch::{SPEEDS, Speed};
 use crate::{RaceRes, Screen};
 
@@ -32,11 +35,7 @@ const ORDERS: [(KeyCode, TeamOrder); 5] = [
     (KeyCode::Digit5, TeamOrder::Protect),
 ];
 
-const GLASS: egui::Color32 = egui::Color32::from_rgba_premultiplied(9, 11, 18, 200);
-const EDGE: egui::Color32 = egui::Color32::from_rgba_premultiplied(40, 44, 56, 90);
-const TRACK: egui::Color32 = egui::Color32::from_rgba_premultiplied(60, 64, 78, 160);
-const LIVE: egui::Color32 = egui::Color32::from_rgb(230, 40, 50);
-const BAD: egui::Color32 = egui::Color32::from_rgb(255, 95, 80);
+const LIVE: egui::Color32 = egui::Color32::from_rgb(240, 50, 70);
 const MARGIN: f32 = 16.0;
 
 pub struct HudPlugin;
@@ -86,25 +85,27 @@ fn race_keys(
 
 // ---- Building blocks -------------------------------------------------------
 
+/// A panel: indigo with a thick edge and a hard shadow, like a sticker.
 pub fn glass() -> egui::Frame {
     egui::Frame::new()
-        .fill(GLASS)
-        .stroke(egui::Stroke::new(1.0, EDGE))
-        .corner_radius(12.0)
+        .fill(CARD.gamma_multiply(0.94))
+        .stroke(egui::Stroke::new(3.0, CARD_EDGE))
+        .corner_radius(18.0)
+        .shadow(drop_shadow())
         .inner_margin(egui::Margin::symmetric(16, 12))
 }
 
-/// A label in small spaced capitals.
+/// A label: small chunky capitals in yellow.
 pub fn caps(text: &str) -> egui::RichText {
     egui::RichText::new(text.to_uppercase())
-        .size(11.0)
-        .extra_letter_spacing(1.4)
-        .color(MUTED)
+        .font(display(14.0))
+        .extra_letter_spacing(0.6)
+        .color(LABEL)
 }
 
 /// A big number with its unit and a label above.
 fn metric(ui: &mut egui::Ui, label: &str, value: String, unit: &str, color: egui::Color32) {
-    metric_sized(ui, label, value, unit, color, 34.0);
+    metric_sized(ui, label, value, unit, color, 36.0);
 }
 
 fn metric_sized(
@@ -120,61 +121,88 @@ fn metric_sized(
         ui.label(caps(label));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(egui::RichText::new(value).font(display(size)).color(color));
+            bold(ui, &value, display(size), color);
             if !unit.is_empty() {
-                ui.label(egui::RichText::new(unit).size(13.0).color(MUTED));
+                ui.label(egui::RichText::new(unit).size(14.0).color(MUTED));
             }
         });
     });
 }
 
-/// A thin rounded bar filled to `frac`.
+/// A fat rounded bar filled to `frac`, outlined, with a shine on top.
 fn bar(ui: &mut egui::Ui, frac: f32, width: f32, color: egui::Color32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 6.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 14.0), egui::Sense::hover());
     let p = ui.painter();
-    p.rect_filled(rect, 3.0, TRACK);
+    p.rect_filled(rect, 7.0, INK);
+    let inner = rect.shrink(2.5);
     let fill = egui::Rect::from_min_size(
-        rect.min,
-        egui::vec2(rect.width() * frac.clamp(0.0, 1.0), rect.height()),
+        inner.min,
+        egui::vec2(
+            (inner.width() * frac.clamp(0.0, 1.0)).max(inner.height()),
+            inner.height(),
+        ),
     );
-    p.rect_filled(fill, 3.0, color);
+    if frac > 0.005 {
+        p.rect_filled(fill, 5.0, color);
+        let shine = egui::Rect::from_min_size(
+            fill.min + egui::vec2(3.0, 1.5),
+            egui::vec2((fill.width() - 6.0).max(0.0), 2.5),
+        );
+        p.rect_filled(shine, 1.5, egui::Color32::from_white_alpha(90));
+    }
 }
 
 /// A labelled bar with its value on the right.
 fn gauge(ui: &mut egui::Ui, label: &str, value: String, frac: f32, color: egui::Color32) {
-    let width = 250.0;
+    let width = 260.0;
     ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
         ui.set_width(width);
         ui.horizontal(|ui| {
             ui.label(caps(label));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new(value).size(13.0).color(color));
+                ui.label(egui::RichText::new(value).font(display(15.0)).color(color));
             });
         });
     });
     bar(ui, frac, width, color);
 }
 
-/// A rounded pill button; `on` fills it with the accent.
+/// A chunky button with a darker lip under it, pressed in when `on`.
 fn pill(ui: &mut egui::Ui, text: &str, on: bool) -> bool {
-    let text = egui::RichText::new(text).size(14.0).color(TEXT);
-    let fill = if on {
+    let font = display(16.0);
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, TEXT);
+    let size = galley.size() + egui::vec2(24.0, 12.0);
+    let (rect, resp) = ui.allocate_exact_size(size + egui::vec2(0.0, 4.0), egui::Sense::click());
+    let lip = if on { 1.0 } else { 4.0 };
+    let face = egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 4.0 - lip), size);
+    let base = if on {
         ACCENT
     } else {
-        egui::Color32::from_rgba_premultiplied(40, 44, 58, 200)
+        egui::Color32::from_rgb(70, 76, 168)
     };
-    ui.add(
-        egui::Button::new(text)
-            .fill(fill)
-            .corner_radius(14.0)
-            .min_size(egui::vec2(0.0, 28.0)),
-    )
-    .clicked()
+    let base = if resp.hovered() {
+        base.gamma_multiply(1.15)
+    } else {
+        base
+    };
+    let p = ui.painter();
+    p.rect_filled(face.translate(egui::vec2(0.0, lip)), 12.0, INK);
+    p.rect_filled(face, 12.0, base);
+    p.rect_stroke(
+        face,
+        12.0,
+        egui::Stroke::new(2.0, INK),
+        egui::StrokeKind::Inside,
+    );
+    let at = face.center() - galley.size() / 2.0;
+    p.galley_with_override_text_color(at + egui::vec2(0.0, 1.5), galley.clone(), INK);
+    p.galley(at, galley, TEXT);
+    resp.clicked()
 }
 
 fn separator(ui: &mut egui::Ui, height: f32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, height), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, EDGE);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(3.0, height), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 1.5, CARD_EDGE);
 }
 
 fn fmt_time(s: f32) -> String {
@@ -269,6 +297,64 @@ fn ghost_gap(gap: f32) -> egui::RichText {
     egui::RichText::new(text).size(14.0).color(color)
 }
 
+/// The reserve (W′): the anaerobic tank that efforts above threshold
+/// drain and riding below it refills. It isn't how tired a rider is: at
+/// an easy pace it stays full however long they've ridden.
+fn reserve(ui: &mut egui::Ui, me: &ridecore::race::Rider, power: f32) {
+    let frac = me.energy.fraction();
+    let state = if power > me.energy.cp {
+        t("loopt leeg", "draining")
+    } else if frac < 0.995 {
+        t("vult bij", "refilling")
+    } else {
+        t("vol", "full")
+    };
+    gauge(
+        ui,
+        t("Reserve W′", "Reserve W′"),
+        format!("{:.0}% · {state}", frac * 100.0),
+        frac,
+        energy_color(frac),
+    );
+}
+
+/// Every rider's power and cadence averaged over about 3 seconds of race
+/// time, as a bike computer shows them: the raw numbers jump about with
+/// every pedal stroke.
+#[derive(Default)]
+struct Smoothed {
+    time: f32,
+    power: Vec<f32>,
+    cadence: Vec<f32>,
+}
+
+impl Smoothed {
+    const WINDOW_S: f32 = 3.0;
+
+    fn update(&mut self, race: &Race) {
+        let n = race.riders.len();
+        if self.power.len() != n || race.time < self.time {
+            self.power = race.riders.iter().map(|r| r.power).collect();
+            self.cadence = race.riders.iter().map(|r| r.cadence).collect();
+            self.time = race.time;
+            return;
+        }
+        let k = 1.0 - (-(race.time - self.time) / Self::WINDOW_S).exp();
+        self.time = race.time;
+        for (i, r) in race.riders.iter().enumerate() {
+            self.power[i] += (r.power - self.power[i]) * k;
+            self.cadence[i] += (r.cadence - self.cadence[i]) * k;
+        }
+    }
+
+    fn of(&self, rider: usize) -> (f32, f32) {
+        (
+            self.power.get(rider).copied().unwrap_or(0.0),
+            self.cadence.get(rider).copied().unwrap_or(0.0),
+        )
+    }
+}
+
 /// What the watching controls asked for this frame.
 enum Watching {
     Speed(Speed),
@@ -295,6 +381,7 @@ fn hud(
     riders: Query<(&RiderModel, &GlobalTransform)>,
     ghost: Query<&GlobalTransform, With<GhostRider>>,
     mut shown: Local<Option<usize>>,
+    mut smooth: Local<Smoothed>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let mut chosen = None;
@@ -302,7 +389,8 @@ fn hud(
     {
         let race = &res.race;
         if res.watch.is_some() {
-            asked = watch_overlay(ctx, &res, &rig, &mut shown);
+            smooth.update(race);
+            asked = watch_overlay(ctx, &res, &rig, &mut shown, &smooth);
         } else {
             ride_overlay(ctx, &res, &input, &settings, &trainer, &feedback, &time);
             chosen = orders(ctx, race, &rig);
@@ -325,11 +413,7 @@ fn hud(
             .show(ctx, |ui| {
                 glass().inner_margin(24).show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new(t("GEPAUZEERD", "PAUSED"))
-                                .font(display(40.0))
-                                .color(TEXT),
-                        );
+                        bold(ui, t("GEPAUZEERD", "PAUSED"), display(40.0), TEXT);
                         ui.add_space(8.0);
                         if pill(ui, t("Hervatten", "Resume"), true) {
                             menu.open = false;
@@ -403,11 +487,7 @@ fn ride_overlay(
                             ui.label(caps(t("Vermogen", "Power")));
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.label(
-                                    egui::RichText::new(format!("{watts:.0}"))
-                                        .font(display(52.0))
-                                        .color(TEXT),
-                                );
+                                bold(ui, &format!("{watts:.0}"), display(52.0), TEXT);
                                 ui.label(egui::RichText::new("W").size(14.0).color(MUTED));
                             });
                             ui.label(
@@ -479,14 +559,11 @@ fn ride_overlay(
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         if !race.started() {
-                            ui.label(
-                                egui::RichText::new(tf!(
-                                    "START OVER {:.0}",
-                                    "START IN {:.0}",
-                                    -race.time
-                                ))
-                                .font(display(34.0))
-                                .color(ACCENT),
+                            bold(
+                                ui,
+                                &tf!("START OVER {:.0}", "START IN {:.0}", -race.time),
+                                display(34.0),
+                                ACCENT,
                             );
                             ui.label(
                                 egui::RichText::new(t(
@@ -506,10 +583,11 @@ fn ride_overlay(
                                 && now - at < 2.5
                             {
                                 let alpha = (1.0 - (now - at) as f32 / 2.5).clamp(0.0, 1.0);
-                                ui.label(
-                                    egui::RichText::new(format!("+{gain}"))
-                                        .font(display(22.0))
-                                        .color(GOOD.gamma_multiply(alpha)),
+                                bold(
+                                    ui,
+                                    &format!("+{gain}"),
+                                    display(22.0),
+                                    GOOD.gamma_multiply(alpha),
                                 );
                             }
                         });
@@ -531,14 +609,7 @@ fn ride_overlay(
         .show(ctx, |ui| {
             glass().show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 6.0;
-                let frac = me.energy.fraction();
-                gauge(
-                    ui,
-                    t("Energie W′", "Energy W′"),
-                    format!("{:.0}%", frac * 100.0),
-                    frac,
-                    energy_color(frac),
-                );
+                reserve(ui, me, input.power_3s);
                 let draft = (me.draft / ridecore::race::pack::DRAFT_MAX).min(1.0);
                 let sheltered = me.draft > 0.25;
                 gauge(
@@ -665,7 +736,7 @@ fn race_strip(ui: &mut egui::Ui, race: &Race) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.label(caps(label));
-            ui.label(egui::RichText::new(value).font(display(22.0)).color(TEXT));
+            bold(ui, &value, display(22.0), TEXT);
         });
     };
     item(ui, t("Tijd", "Time"), fmt_time(race.time));
@@ -790,10 +861,12 @@ fn watch_overlay(
     res: &RaceRes,
     rig: &CameraRig,
     shown: &mut Option<usize>,
+    smooth: &Smoothed,
 ) -> Option<Watching> {
     let race = &res.race;
     let watch = res.watch.as_ref()?;
     let me = race.player();
+    let (power, cadence) = smooth.of(race.human);
     let mut asked = None;
 
     // Live bar.
@@ -822,30 +895,24 @@ fn watch_overlay(
                                 .and_then(|g| g.riders.first())
                                 .copied()
                                 .unwrap_or(race.human);
-                            ui.label(
-                                egui::RichText::new(fmt_time(race.time))
-                                    .font(display(24.0))
-                                    .color(TEXT),
-                            );
+                            bold(ui, &fmt_time(race.time), display(24.0), TEXT);
                             ui.label(caps(t("Kop van de koers", "Race leader")));
-                            ui.label(
-                                egui::RichText::new(tf!(
+                            bold(
+                                ui,
+                                &tf!(
                                     "nog {:.1} km",
                                     "{:.1} km to go",
                                     race.remaining_m(head) / 1000.0
-                                ))
-                                .font(display(24.0))
-                                .color(TEXT),
+                                ),
+                                display(24.0),
+                                TEXT,
                             );
                         } else {
-                            ui.label(
-                                egui::RichText::new(tf!(
-                                    "START OVER {:.0}",
-                                    "START IN {:.0}",
-                                    -race.time
-                                ))
-                                .font(display(24.0))
-                                .color(ACCENT),
+                            bold(
+                                ui,
+                                &tf!("START OVER {:.0}", "START IN {:.0}", -race.time),
+                                display(24.0),
+                                ACCENT,
                             );
                         }
                         ui.label(
@@ -873,11 +940,7 @@ fn watch_overlay(
                             race.position(race.human),
                             race.teams[me.team].spec.name
                         )));
-                        ui.label(
-                            egui::RichText::new(me.profile.name.to_uppercase())
-                                .font(display(30.0))
-                                .color(TEXT),
-                        );
+                        bold(ui, &me.profile.name.to_uppercase(), display(30.0), TEXT);
                         ui.label(
                             egui::RichText::new(format!(
                                 "{} · {}",
@@ -899,27 +962,20 @@ fn watch_overlay(
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 18.0;
-                    let (_, zc) = zone(me.power, me.profile.ftp);
-                    metric(ui, "Watt", format!("{:.0}", me.power), "", zc);
+                    let (_, zc) = zone(power, me.profile.ftp);
+                    metric(ui, "Watt", format!("{power:.0}"), "", zc);
                     metric(
                         ui,
                         "W/kg",
-                        format!("{:.1}", me.power / me.profile.kg),
+                        format!("{:.1}", power / me.profile.kg),
                         "",
                         TEXT,
                     );
                     metric(ui, "km/h", format!("{:.1}", me.speed * 3.6), "", TEXT);
-                    metric(ui, "rpm", format!("{:.0}", me.cadence), "", TEXT);
+                    metric(ui, "rpm", format!("{cadence:.0}"), "", TEXT);
                 });
                 ui.add_space(4.0);
-                let frac = me.energy.fraction();
-                gauge(
-                    ui,
-                    t("Energie W′", "Energy W′"),
-                    format!("{:.0}%", frac * 100.0),
-                    frac,
-                    energy_color(frac),
-                );
+                reserve(ui, me, power);
                 ui.horizontal(|ui| {
                     ui.label(caps(&format!(
                         "{} {:.1}%",
@@ -1056,8 +1112,8 @@ fn watch_overlay(
                 });
                 ui.label(
                     egui::RichText::new(tf!(
-                        "Pijltjes renner  ·  Tab groep  ·  D regie  ·  0–4 snelheid  ·  C camera ({})  ·  P pauze  ·  Esc menu",
-                        "Arrows rider  ·  Tab group  ·  D director  ·  0–4 speed  ·  C camera ({})  ·  P pause  ·  Esc menu",
+                        "Pijltjes renner · Tab groep · D regie · 0–4 snelheid · C camera ({}) · P pauze",
+                        "Arrows rider · Tab group · D director · 0–4 speed · C camera ({}) · P pause",
                         rig.view.label()
                     ))
                     .size(12.0)
@@ -1090,8 +1146,9 @@ fn ticker(ctx: &egui::Context, race: &Race, watching: bool) {
                 }
                 let alpha = (1.0 - age / 15.0).clamp(0.2, 1.0);
                 glass()
-                    .fill(GLASS.gamma_multiply(alpha))
-                    .stroke(egui::Stroke::NONE)
+                    .fill(CARD.gamma_multiply(alpha))
+                    .stroke(egui::Stroke::new(2.0, CARD_EDGE.gamma_multiply(alpha)))
+                    .shadow(egui::Shadow::NONE)
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .corner_radius(8.0)
                     .show(ui, |ui| {
@@ -1161,7 +1218,7 @@ fn profile_strip(ctx: &egui::Context, race: &Race) {
                             egui::pos2(w[1].x, rect.bottom()),
                             egui::pos2(w[0].x, rect.bottom()),
                         ],
-                        egui::Color32::from_rgba_premultiplied(60, 70, 90, 150),
+                        egui::Color32::from_rgb(78, 84, 176),
                         egui::Stroke::NONE,
                     ));
                 }
@@ -1219,35 +1276,32 @@ fn name_tags(
         let Ok(p) = cam.world_to_viewport(cam_tf, at) else {
             return;
         };
-        let galley =
-            painter.layout_no_wrap(text, egui::FontId::proportional(12.5), egui::Color32::WHITE);
+        let galley = painter.layout_no_wrap(text, display(14.0), egui::Color32::WHITE);
         let bg = egui::Rect::from_center_size(
             egui::pos2(p.x, p.y),
-            galley.size() + egui::vec2(12.0, 5.0),
+            galley.size() + egui::vec2(14.0, 6.0),
         );
         if taken.iter().any(|r| r.expand(2.0).intersects(bg)) {
             return;
         }
         taken.push(bg);
-        painter.rect_filled(bg, 4.0, GLASS);
+        // A team-colored sticker with a dark outline and a hard shadow.
         painter.rect_filled(
-            egui::Rect::from_min_size(bg.min, egui::vec2(3.0, bg.height())),
-            egui::CornerRadius {
-                nw: 4,
-                sw: 4,
-                ..Default::default()
-            },
-            color,
+            bg.translate(egui::vec2(0.0, 3.0)),
+            9.0,
+            INK.gamma_multiply(0.7),
         );
-        if outline {
-            painter.rect_stroke(
-                bg,
-                4.0,
-                egui::Stroke::new(1.5, ACCENT),
-                egui::StrokeKind::Outside,
-            );
-        }
-        painter.galley(bg.min + egui::vec2(7.0, 2.5), galley, egui::Color32::WHITE);
+        painter.rect_filled(bg, 9.0, color);
+        let (width, edge) = if outline { (3.0, LABEL) } else { (2.0, INK) };
+        painter.rect_stroke(
+            bg,
+            9.0,
+            egui::Stroke::new(width, edge),
+            egui::StrokeKind::Outside,
+        );
+        let at = bg.min + egui::vec2(7.0, 3.0);
+        painter.galley_with_override_text_color(at + egui::vec2(0.0, 1.5), galley.clone(), INK);
+        painter.galley(at, galley, egui::Color32::WHITE);
     };
     let me = race.player();
     // Nearest first, so they win the space.

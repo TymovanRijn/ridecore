@@ -529,7 +529,7 @@ fn setup_ui(
 }
 
 /// Room kept for the start card under the field.
-const START_CARD_H: f32 = 280.0;
+const START_CARD_H: f32 = 300.0;
 
 fn column(ui: &mut egui::Ui, id: &str, width: f32, height: f32, body: impl FnOnce(&mut egui::Ui)) {
     // Columns stack top-down; inheriting the row's left-to-right layout

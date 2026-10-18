@@ -1,20 +1,53 @@
-//! The look of every screen: Barlow fonts (SIL Open Font License, in
-//! assets/fonts), a dark glassy style with an orange accent, and helpers
-//! for cards and big numbers.
+//! The look of every screen, cartoony like the 3D world: chunky Lilita One
+//! for titles and numbers and rounded Varela Round for text (both under
+//! the SIL Open Font License, in assets/fonts), indigo panels with a thick
+//! edge and a hard drop shadow like a sticker, yellow labels and an orange
+//! accent, and helpers for cards and big numbers.
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(255, 122, 26);
-pub const ACCENT_SOFT: egui::Color32 = egui::Color32::from_rgb(255, 170, 90);
-pub const TEXT: egui::Color32 = egui::Color32::from_rgb(236, 239, 245);
-pub const MUTED: egui::Color32 = egui::Color32::from_rgb(150, 158, 175);
-pub const GOOD: egui::Color32 = egui::Color32::from_rgb(70, 215, 120);
-pub const WARN: egui::Color32 = egui::Color32::from_rgb(255, 196, 60);
-pub const CARD: egui::Color32 = egui::Color32::from_rgba_premultiplied(14, 17, 27, 222);
-pub const CARD_EDGE: egui::Color32 = egui::Color32::from_rgba_premultiplied(60, 66, 86, 140);
+pub const ACCENT_SOFT: egui::Color32 = egui::Color32::from_rgb(255, 210, 63);
+pub const TEXT: egui::Color32 = egui::Color32::from_rgb(255, 252, 245);
+pub const MUTED: egui::Color32 = egui::Color32::from_rgb(178, 184, 232);
+pub const GOOD: egui::Color32 = egui::Color32::from_rgb(61, 220, 132);
+pub const WARN: egui::Color32 = egui::Color32::from_rgb(255, 210, 63);
+pub const BAD: egui::Color32 = egui::Color32::from_rgb(255, 77, 94);
+/// Labels.
+pub const LABEL: egui::Color32 = egui::Color32::from_rgb(255, 210, 63);
+pub const CARD: egui::Color32 = egui::Color32::from_rgb(38, 40, 98);
+pub const CARD_EDGE: egui::Color32 = egui::Color32::from_rgb(86, 92, 186);
+/// Outlines and drop shadows.
+pub const INK: egui::Color32 = egui::Color32::from_rgb(18, 16, 46);
 
-/// Condensed bold face for titles and big numbers.
+/// The sticker shadow under panels.
+pub fn drop_shadow() -> egui::Shadow {
+    egui::Shadow {
+        offset: [0, 5],
+        blur: 0,
+        spread: 0,
+        color: INK.gamma_multiply(0.75),
+    }
+}
+
+/// Text with a hard shadow under it, for big numbers and titles.
+pub fn bold(
+    ui: &mut egui::Ui,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, color);
+    let (rect, resp) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+    let drop = (galley.size().y * 0.06).clamp(1.5, 3.5);
+    let p = ui.painter();
+    p.galley_with_override_text_color(rect.min + egui::vec2(0.0, drop), galley.clone(), INK);
+    p.galley(rect.min, galley, color);
+    resp
+}
+
+/// The chunky face for titles and big numbers.
 pub fn display(size: f32) -> egui::FontId {
     egui::FontId::new(size, egui::FontFamily::Name("display".into()))
 }
@@ -52,20 +85,20 @@ fn install(mut contexts: EguiContexts, mut installed: ResMut<Installed>) -> Resu
         );
     };
     add(
-        "barlow",
-        include_bytes!("../../../assets/fonts/Barlow-Medium.ttf"),
+        "varela",
+        include_bytes!("../../../assets/fonts/VarelaRound-Regular.ttf"),
     );
     add(
-        "barlow-condensed",
-        include_bytes!("../../../assets/fonts/BarlowCondensed-ExtraBold.ttf"),
+        "lilita",
+        include_bytes!("../../../assets/fonts/LilitaOne-Regular.ttf"),
     );
-    // Barlow first; egui's own fonts stay behind it for symbols it lacks.
+    // Ours first; egui's own fonts stay behind for symbols they lack.
     fonts
         .families
         .entry(egui::FontFamily::Proportional)
         .or_default()
-        .insert(0, "barlow".into());
-    let mut condensed = vec!["barlow-condensed".to_string()];
+        .insert(0, "varela".into());
+    let mut condensed = vec!["lilita".to_string()];
     condensed.extend(
         fonts.families[&egui::FontFamily::Proportional]
             .iter()
@@ -96,26 +129,30 @@ fn install(mut contexts: EguiContexts, mut installed: ResMut<Installed>) -> Resu
         v.override_text_color = Some(TEXT);
         v.panel_fill = egui::Color32::TRANSPARENT;
         v.window_fill = CARD;
-        v.window_stroke = egui::Stroke::new(1.0, CARD_EDGE);
-        v.window_corner_radius = 14.0.into();
-        v.extreme_bg_color = egui::Color32::from_rgb(10, 12, 20);
+        v.window_stroke = egui::Stroke::new(3.0, CARD_EDGE);
+        v.window_corner_radius = 18.0.into();
+        v.window_shadow = drop_shadow();
+        v.extreme_bg_color = egui::Color32::from_rgb(24, 24, 66);
         v.selection.bg_fill = ACCENT.gamma_multiply(0.85);
         v.selection.stroke = egui::Stroke::new(1.5, egui::Color32::WHITE);
         v.hyperlink_color = ACCENT_SOFT;
         v.slider_trailing_fill = true;
         for (w, fill) in [
-            (&mut v.widgets.inactive, egui::Color32::from_rgb(34, 39, 54)),
-            (&mut v.widgets.hovered, egui::Color32::from_rgb(48, 55, 76)),
+            (
+                &mut v.widgets.inactive,
+                egui::Color32::from_rgb(58, 62, 140),
+            ),
+            (&mut v.widgets.hovered, egui::Color32::from_rgb(76, 82, 170)),
             (&mut v.widgets.active, ACCENT),
         ] {
             w.bg_fill = fill;
             w.weak_bg_fill = fill;
-            w.corner_radius = 8.0.into();
-            w.bg_stroke = egui::Stroke::NONE;
+            w.corner_radius = 12.0.into();
+            w.bg_stroke = egui::Stroke::new(2.0, INK.gamma_multiply(0.6));
         }
-        v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT.gamma_multiply(0.6));
-        v.widgets.noninteractive.corner_radius = 8.0.into();
-        v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, CARD_EDGE);
+        v.widgets.hovered.bg_stroke = egui::Stroke::new(2.0, ACCENT_SOFT);
+        v.widgets.noninteractive.corner_radius = 12.0.into();
+        v.widgets.noninteractive.bg_stroke = egui::Stroke::new(2.0, CARD_EDGE);
     });
     installed.0 = 1;
     Ok(())
@@ -125,17 +162,18 @@ fn install(mut contexts: EguiContexts, mut installed: ResMut<Installed>) -> Resu
 pub fn card<R>(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let r = egui::Frame::new()
         .fill(CARD)
-        .stroke(egui::Stroke::new(1.0, CARD_EDGE))
-        .corner_radius(14.0)
+        .stroke(egui::Stroke::new(3.0, CARD_EDGE))
+        .corner_radius(18.0)
+        .shadow(drop_shadow())
         .inner_margin(egui::Margin::same(16))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             if !title.is_empty() {
                 ui.label(
                     egui::RichText::new(title.to_uppercase())
-                        .font(display(15.0))
-                        .color(ACCENT_SOFT)
-                        .extra_letter_spacing(1.5),
+                        .font(display(17.0))
+                        .color(LABEL)
+                        .extra_letter_spacing(0.6),
                 );
                 ui.add_space(4.0);
             }
@@ -149,7 +187,7 @@ pub fn card<R>(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui) 
 /// A big number with a small label under it.
 pub fn stat(ui: &mut egui::Ui, value: impl Into<String>, label: &str, color: egui::Color32) {
     ui.vertical(|ui| {
-        ui.label(egui::RichText::new(value).font(display(34.0)).color(color));
+        bold(ui, &value.into(), display(34.0), color);
         ui.label(
             egui::RichText::new(label.to_uppercase())
                 .small()
