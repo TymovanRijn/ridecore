@@ -183,6 +183,9 @@ pub struct Race {
     pub(crate) player_marked_until: f32,
 }
 
+/// Spread of a rider's threshold on the day, as a share of it.
+pub const DAY_FORM_SD: f32 = 0.025;
+
 impl Race {
     pub fn new(cfg: &RaceConfig) -> Self {
         let mut rng = Rng::new(cfg.seed);
@@ -214,8 +217,14 @@ impl Race {
                 player_slot = Some(slot);
             }
             let first = riders.len();
-            for (k, profile) in profiles.into_iter().enumerate() {
+            for (k, mut profile) in profiles.into_iter().enumerate() {
                 let is_human = player_slot == Some(k);
+                if !is_human {
+                    // Nobody is the same rider every day: a few percent
+                    // either way, which the team knows when it picks its
+                    // leader.
+                    profile.ftp *= rng.normal(1.0, DAY_FORM_SD).clamp(0.93, 1.07);
+                }
                 if is_human {
                     human = riders.len();
                 }

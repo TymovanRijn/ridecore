@@ -2,11 +2,26 @@
 //!
 //! Every second above critical power (CP) spends W′; below CP it recovers
 //! exponentially. This is what makes attacks costly and lets riders crack.
+//!
+//! Over hours CP itself sags with the work done ("durability", Maunder et
+//! al. 2021; Spragg et al. 2023): little in the first hour and a half, then
+//! a few percent per hour, so the end of a long race favours the fresh.
+
+/// CP holds until this much work (in hours at CP) is done…
+const FADE_FROM_H: f32 = 1.5;
+/// …then drops this share per further hour of it…
+const FADE_PER_H: f32 = 0.04;
+/// …down to at most this much.
+const MAX_FADE: f32 = 0.12;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Energy {
-    /// Critical power in watts (≈ FTP).
+    /// Critical power in watts (≈ FTP), as it is now.
     pub cp: f32,
+    /// Critical power fresh.
+    pub fresh_cp: f32,
+    /// Work done so far in joules.
+    pub work: f32,
     /// Full W′ in joules.
     pub w_prime: f32,
     /// Remaining W′ in joules.
@@ -17,6 +32,8 @@ impl Energy {
     pub fn new(cp: f32, w_prime: f32) -> Self {
         Self {
             cp,
+            fresh_cp: cp,
+            work: 0.0,
             w_prime,
             balance: w_prime,
         }
@@ -27,6 +44,11 @@ impl Energy {
     }
 
     pub fn step(&mut self, power: f32, dt: f32) {
+        self.work += power.max(0.0) * dt;
+        // Work in hours ridden at fresh CP.
+        let hours = self.work / (self.fresh_cp * 3600.0);
+        let fade = ((hours - FADE_FROM_H).max(0.0) * FADE_PER_H).min(MAX_FADE);
+        self.cp = self.fresh_cp * (1.0 - fade);
         if power > self.cp {
             self.balance -= (power - self.cp) * dt;
         } else {
@@ -64,6 +86,21 @@ mod tests {
         }
         assert!(e.balance > drained + 4_000.0, "{}", e.balance);
         assert!(e.balance < 20_000.0);
+    }
+
+    #[test]
+    fn cp_sags_late_in_a_long_race() {
+        let mut e = Energy::new(300.0, 20_000.0);
+        // An hour at 80%: still fresh.
+        for _ in 0..3600 {
+            e.step(240.0, 1.0);
+        }
+        assert_eq!(e.cp, 300.0);
+        // Three more: a few percent down.
+        for _ in 0..3 * 3600 {
+            e.step(240.0, 1.0);
+        }
+        assert!(e.cp < 290.0 && e.cp > 275.0, "{}", e.cp);
     }
 
     #[test]

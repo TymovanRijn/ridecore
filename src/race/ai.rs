@@ -118,6 +118,8 @@ const LEADOUT_M: f64 = 3500.0;
 const SPRINT_GAIN_MPS: f32 = 4.0;
 /// Chasers pace their turns to last a chase of a few minutes.
 const CHASE_EFFORT_S: f32 = 180.0;
+/// A break this big is a threat whoever is in it.
+const BIG_BREAK: usize = 6;
 /// The player riding this much under the group's pace gets passed...
 const EASING_MARGIN_MPS: f32 = 0.3;
 /// ...and this much over it is an attack most riders don't follow.
@@ -418,7 +420,24 @@ fn direct_team(race: &mut Race, t: usize, sit: &Situation) {
             Plan::Climb => 1.5,
             Plan::Break => 2.5,
         };
-        let allowed = allowed_gap_s(remaining as f32 / bunch_speed) * keen;
+        // Who is up the road matters as much as how far: a big break, or one
+        // holding a rider as strong as our leader, gets a much shorter leash
+        // than a couple of harmless escapees.
+        let ahead: Vec<&Rider> = race.groups[..lg]
+            .iter()
+            .flat_map(|g| &g.riders)
+            .map(|&i| &race.riders[i])
+            .collect();
+        let rival = ahead
+            .iter()
+            .any(|r| r.profile.wkg() >= race.riders[leader].profile.wkg());
+        let threat = match (ahead.len(), rival) {
+            (_, true) => 0.5,
+            (n, false) if n >= BIG_BREAK => 0.7,
+            (n, false) if n <= 2 => 1.2,
+            _ => 1.0,
+        };
+        let allowed = allowed_gap_s(remaining as f32 / bunch_speed) * keen * threat;
         if bunch_gap > allowed {
             let head = &race.riders[race.groups[0].riders[0]];
             let grade = race.course.grade_pct_at(head.dist) / 100.0;
@@ -994,8 +1013,10 @@ fn bridge(r: &Rider, target: &Rider, grade: f32) -> f32 {
     required_power(r, v_target, grade).min(1.2 * r.profile.ftp)
 }
 
-/// For a sprint team's leader in the finale: the nearest teammate ahead in
-/// their lead-out train, whose wheel they ride.
+/// For a sprint team's leader in the finale: the wheel to ride. That's the
+/// nearest teammate ahead in their lead-out train or, with no train of their
+/// own, a rival sprinter who has one: sprinters without a team surf the
+/// strongest train.
 fn train_ahead(race: &Race, i: usize) -> Option<usize> {
     let r = &race.riders[i];
     let team = &race.teams[r.team];
@@ -1003,14 +1024,30 @@ fn train_ahead(race: &Race, i: usize) -> Option<usize> {
         return None;
     }
     let g = race.groups.iter().find(|g| g.riders.contains(&i))?;
-    g.riders
-        .iter()
-        .copied()
-        .filter(|&j| {
-            let o = &race.riders[j];
-            o.team == r.team && matches!(o.intent, Intent::Pull { .. }) && o.dist > r.dist
-        })
-        .min_by(|&a, &b| race.riders[a].dist.total_cmp(&race.riders[b].dist))
+    let own_train = |s: usize| {
+        let leader = &race.riders[s];
+        g.riders
+            .iter()
+            .copied()
+            .filter(|&j| {
+                let o = &race.riders[j];
+                o.team == leader.team
+                    && matches!(o.intent, Intent::Pull { .. })
+                    && o.dist > leader.dist
+            })
+            .min_by(|&a, &b| race.riders[a].dist.total_cmp(&race.riders[b].dist))
+    };
+    own_train(i).or_else(|| {
+        g.riders
+            .iter()
+            .copied()
+            .filter(|&j| {
+                let t = &race.teams[race.riders[j].team];
+                j != i && t.leader == j && t.plan == Plan::Sprint && !race.riders[j].human
+            })
+            .filter(|&j| own_train(j).is_some())
+            .max_by(|&a, &b| race.riders[a].dist.total_cmp(&race.riders[b].dist))
+    })
 }
 
 /// Pedal power for a bot this substep.
