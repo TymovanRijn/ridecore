@@ -8,6 +8,7 @@ mod osm;
 mod props;
 mod sky;
 mod terrain;
+mod trees;
 pub use sky::HAZE;
 mod zones;
 
@@ -350,17 +351,26 @@ fn fbm(x: f32, z: f32) -> f32 {
     sum
 }
 
-/// Collects triangles for a mesh; flat-shaded with per-vertex colors.
+/// Collects triangles for a mesh with per-vertex colors; flat-shaded,
+/// except where a shape gives its own normals (rounded tree crowns).
 #[derive(Default)]
 pub(crate) struct Tris {
     pos: Vec<[f32; 3]>,
+    nrm: Vec<[f32; 3]>,
     col: Vec<[f32; 4]>,
 }
 
 impl Tris {
     fn tri(&mut self, a: Vec3, b: Vec3, c: Vec3, color: [f32; 4]) {
-        self.pos.extend([a.to_array(), b.to_array(), c.to_array()]);
-        self.col.extend([color; 3]);
+        let n = (b - a).cross(c - a).normalize_or(Vec3::Y);
+        self.tri_shaded([a, b, c], [n; 3], [color; 3]);
+    }
+
+    /// A triangle with its own normal and color at each corner.
+    fn tri_shaded(&mut self, p: [Vec3; 3], n: [Vec3; 3], c: [[f32; 4]; 3]) {
+        self.pos.extend(p.map(|v| v.to_array()));
+        self.nrm.extend(n.map(|v| v.to_array()));
+        self.col.extend(c);
     }
 
     /// Quad a-b-c-d, counter-clockwise seen from its front. With travel
@@ -374,11 +384,12 @@ impl Tris {
     /// skip tiles that are off screen or outside a shadow cascade.
     fn split(self, size: f32) -> Vec<Tris> {
         let mut tiles: std::collections::HashMap<(i32, i32), Tris> = Default::default();
-        for (p, c) in self
+        for ((p, n), c) in self
             .pos
             .as_chunks::<3>()
             .0
             .iter()
+            .zip(self.nrm.as_chunks::<3>().0)
             .zip(self.col.as_chunks::<3>().0)
         {
             let (x, z) = (
@@ -389,6 +400,7 @@ impl Tris {
                 .entry(((x / size).floor() as i32, (z / size).floor() as i32))
                 .or_default();
             t.pos.extend_from_slice(p);
+            t.nrm.extend_from_slice(n);
             t.col.extend_from_slice(c);
         }
         tiles.into_values().collect()
@@ -396,16 +408,14 @@ impl Tris {
 
     fn mesh(self) -> Mesh {
         let n = self.pos.len() as u32;
-        let mut mesh = Mesh::new(
+        Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::RENDER_WORLD,
         )
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.nrm)
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, self.col)
-        .with_inserted_indices(Indices::U32((0..n).collect()));
-        mesh.duplicate_vertices();
-        mesh.compute_flat_normals();
-        mesh
+        .with_inserted_indices(Indices::U32((0..n).collect()))
     }
 }
 

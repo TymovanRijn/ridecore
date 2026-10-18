@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use ridecore::rng::Rng;
 
 use super::Tris;
+use super::trees::{Detail, conifer, leafy, shrub};
 
 pub type Rgba = [f32; 4];
 
@@ -222,69 +223,66 @@ const AUTUMN: [Rgba; 4] = [
 ];
 
 pub fn pine(t: &mut Tris, p: Vec3, s: f32, rng: &mut Rng) {
-    prism(t, p, 0.22 * s, 2.0 * s, 5, BARK);
     let g = pick(rng, &PINES);
-    for (k, (r, h)) in [(2.4, 4.0), (1.9, 3.4), (1.3, 2.8)].iter().enumerate() {
-        cone(
-            t,
-            p + Vec3::Y * (1.6 + k as f32 * 1.7) * s,
-            r * s,
-            h * s,
-            7,
-            shade(g, 1.0 + k as f32 * 0.06),
-        );
-    }
+    let tall = rng.range(0.85, 1.25);
+    conifer(t, p, 9.5 * s * tall, 2.5 * s, Detail::Mid, [g, BARK], rng);
 }
 
 pub fn broadleaf(t: &mut Tris, p: Vec3, s: f32, rng: &mut Rng, autumn: bool) {
-    prism(t, p, 0.28 * s, 3.0 * s, 5, BARK);
     let g = if autumn && rng.chance(0.7) {
         pick(rng, &AUTUMN)
     } else {
         pick(rng, &LEAVES)
     };
-    blob(t, p + Vec3::Y * 4.4 * s, Vec3::new(2.6, 2.2, 2.6) * s, g);
-    blob(
+    let crown = p + Vec3::Y * rng.range(4.0, 4.8) * s;
+    leafy(
         t,
-        p + Vec3::new(1.2, 3.8, 0.6) * s,
-        Vec3::splat(1.6) * s,
-        shade(g, 0.9),
-    );
-    blob(
-        t,
-        p + Vec3::new(-1.0, 4.0, -0.9) * s,
-        Vec3::splat(1.5) * s,
-        shade(g, 1.1),
+        p,
+        crown,
+        Vec3::new(2.8, 2.4, 2.7) * s,
+        Detail::Mid,
+        [g, BARK],
+        rng,
     );
 }
 
 pub fn birch(t: &mut Tris, p: Vec3, s: f32, rng: &mut Rng, autumn: bool) {
-    prism(t, p, 0.16 * s, 4.5 * s, 5, rgb(0.9, 0.9, 0.86));
+    let g = if autumn {
+        leaf(0.92, 0.78, 0.25)
+    } else {
+        pick(rng, &[leaf(0.45, 0.65, 0.25), leaf(0.5, 0.7, 0.3)])
+    };
+    let crown = p + Vec3::Y * 5.4 * s;
+    leafy(
+        t,
+        p,
+        crown,
+        Vec3::new(1.8, 2.6, 1.8) * s,
+        Detail::Mid,
+        [g, rgb(0.9, 0.9, 0.86)],
+        rng,
+    );
+    // Dark marks on the white bark.
     for k in 0..3 {
         prism(
             t,
             p + Vec3::Y * (1.0 + k as f32 * 1.2) * s,
-            0.17 * s,
+            0.21 * s,
             0.12 * s,
             5,
             rgb(0.15, 0.15, 0.15),
         );
     }
-    let g = if autumn {
-        rgb(0.92, 0.78, 0.25)
-    } else {
-        pick(rng, &[rgb(0.45, 0.65, 0.25), rgb(0.5, 0.7, 0.3)])
-    };
-    blob(t, p + Vec3::Y * 5.2 * s, Vec3::new(1.7, 2.4, 1.7) * s, g);
 }
 
 pub fn bush(t: &mut Tris, p: Vec3, s: f32, rng: &mut Rng) {
     let g = pick(rng, &LEAVES);
-    blob(
+    shrub(
         t,
         p + Vec3::Y * 0.6 * s,
-        Vec3::new(1.2, 0.9, 1.1) * s,
+        Vec3::new(1.3, 1.0, 1.2) * s,
         shade(g, 0.85),
+        rng,
     );
 }
 

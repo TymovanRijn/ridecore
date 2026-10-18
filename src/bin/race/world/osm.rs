@@ -14,6 +14,7 @@ use ridecore::rng::Rng;
 
 use super::ground::Grid;
 use super::props::{self, Rgba, forest_floor, leaf, rgb};
+use super::trees::{self, Detail};
 use super::{ROAD_HALF, RoadIndex, Tris, fbm};
 
 /// The road's own corridor: nothing from the map is built this close.
@@ -42,7 +43,7 @@ pub fn cover_color(cover: Cover, p: Vec3) -> Option<Rgba> {
     })
 }
 
-// Cheap trees: there are tens of thousands of them.
+// Tree colors; the shapes are in `trees`.
 const SPRUCE: [Rgba; 3] = [
     leaf(0.08, 0.22, 0.12),
     leaf(0.1, 0.26, 0.14),
@@ -57,54 +58,33 @@ const BEECH: [Rgba; 4] = [
 const BARK: Rgba = rgb(0.3, 0.22, 0.15);
 
 /// `near`: full detail for trees the camera passes close by.
-fn spruce(t: &mut Tris, p: Vec3, s: f32, near: bool, rng: &mut Rng) {
+fn spruce(t: &mut Tris, p: Vec3, s: f32, detail: Detail, rng: &mut Rng) {
     let g = *rng.pick(&SPRUCE);
-    props::prism(t, p, 0.25 * s, 2.2 * s, 3, BARK);
-    // Tiers of drooping branches narrowing to a spire, some trees taller
-    // and slimmer than others.
+    // Some trees taller and slimmer than others.
     let tall = rng.range(0.9, 1.3);
-    let tiers = if near { 4 } else { 3 };
-    for k in 0..tiers {
-        let f = k as f32 / tiers as f32;
-        props::cone(
-            t,
-            p + Vec3::Y * (1.3 + f * 7.2 * tall) * s,
-            (2.4 - f * 1.55) / tall.sqrt() * s,
-            (3.8 - f * 0.9) * tall * s,
-            if near { 6 } else { 5 },
-            shade(g, 0.9 + f * 0.25),
-        );
-    }
+    trees::conifer(
+        t,
+        p,
+        11.5 * s * tall,
+        2.6 * s / tall.sqrt(),
+        detail,
+        [g, BARK],
+        rng,
+    );
 }
 
-fn beech(t: &mut Tris, p: Vec3, s: f32, near: bool, rng: &mut Rng) {
+fn beech(t: &mut Tris, p: Vec3, s: f32, detail: Detail, rng: &mut Rng) {
     let g = *rng.pick(&BEECH);
-    props::prism(t, p, 0.3 * s, 4.6 * s, 3, BARK);
-    // A lumpy crown: one main mass and smaller ones beside it.
-    let crown = p + Vec3::Y * 6.8 * s;
-    props::blob(t, crown, Vec3::new(2.9, 2.5, 2.8) * s, g);
-    for _ in 0..if near { 3 } else { 1 } {
-        let a = rng.range(0.0, TAU);
-        let o = Vec3::new(a.cos() * 2.1, rng.range(-0.9, 1.3), a.sin() * 2.1) * s;
-        let r = rng.range(1.4, 2.0) * s;
-        props::blob(
-            t,
-            crown + o,
-            Vec3::splat(r),
-            shade(g, rng.range(0.85, 1.15)),
-        );
-    }
-}
-
-/// A distant tree: a single cone, cheap enough to fill the hillsides.
-fn far_tree(t: &mut Tris, p: Vec3, s: f32, conifer: bool, rng: &mut Rng) {
-    if conifer {
-        let g = *rng.pick(&SPRUCE);
-        props::cone(t, p + Vec3::Y * s, 2.6 * s, 10.0 * s, 5, g);
-    } else {
-        let g = *rng.pick(&BEECH);
-        props::cone(t, p + Vec3::Y * 1.5 * s, 4.2 * s, 8.0 * s, 5, g);
-    }
+    let crown = p + Vec3::Y * rng.range(6.2, 7.4) * s;
+    trees::leafy(
+        t,
+        p,
+        crown,
+        Vec3::new(3.4, 3.0, 3.3) * s,
+        detail,
+        [g, BARK],
+        rng,
+    );
 }
 
 /// Trees where the map has woods, densest along the road. Distant ones go
@@ -141,10 +121,15 @@ pub fn forest_trees(t: &mut Tris, far: &mut Tris, index: &RoadIndex, map: &MapDa
             // Spruce plantations and beech woods come in patches.
             let s = rng.range(0.85, 1.35);
             let conifer = fbm(x / 160.0 + 7.0, z / 160.0) > 0.0;
-            match (conifer, n.dist) {
-                (_, d) if d > 210.0 => far_tree(far, p, s * 1.15, conifer, rng),
-                (true, d) => spruce(t, p, s, d < 45.0, rng),
-                (false, d) => beech(t, p, s, d < 45.0, rng),
+            let (t, detail, s) = match n.dist {
+                d if d > 150.0 => (&mut *far, Detail::Far, s * 1.15),
+                d if d > 25.0 => (&mut *t, Detail::Mid, s),
+                _ => (&mut *t, Detail::Near, s),
+            };
+            if conifer {
+                spruce(t, p, s, detail, rng);
+            } else {
+                beech(t, p, s, detail, rng);
             }
         }
     }
