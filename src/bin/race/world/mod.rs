@@ -6,10 +6,10 @@
 mod ground;
 mod osm;
 mod props;
-mod sky;
+pub mod sky;
 mod terrain;
 mod trees;
-pub use sky::HAZE;
+pub use sky::{Daylight, HAZE};
 mod zones;
 
 use std::f32::consts::{PI, TAU};
@@ -65,7 +65,8 @@ impl Plugin for WorldPlugin {
             PostUpdate,
             sky::follow_camera.before(TransformSystems::Propagate),
         )
-        .add_systems(OnEnter(Screen::Racing), spawn_world)
+        .init_resource::<Daylight>()
+        .add_systems(OnEnter(Screen::Racing), (sky::apply_daylight, spawn_world))
         .add_systems(OnEnter(Screen::Setup), despawn_world)
         .add_systems(
             Update,
@@ -83,7 +84,7 @@ fn spawn_sun(mut commands: Commands) {
             color: Color::srgb(1.0, 0.96, 0.88),
             ..default()
         },
-        Transform::from_xyz(0.0, 0.0, 0.0).looking_at(-sky::sun_direction(), Vec3::Y),
+        Transform::from_xyz(0.0, 0.0, 0.0).looking_at(-Daylight::Midday.look().sun, Vec3::Y),
         CascadeShadowConfigBuilder {
             first_cascade_far_bound: 25.0,
             maximum_distance: 160.0,
@@ -465,6 +466,7 @@ struct Spectator {
 #[derive(Component)]
 struct Sails;
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_world(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -473,7 +475,9 @@ fn spawn_world(
     mut surfaces: ResMut<Assets<terrain::Surface>>,
     mut fog: Query<&mut DistanceFog>,
     res: Res<RaceRes>,
+    daylight: Res<Daylight>,
 ) {
+    let look = daylight.look();
     let started = std::time::Instant::now();
     let course = &res.race.course;
     let ds = lap_samples(course);
@@ -737,11 +741,12 @@ fn spawn_world(
         );
     }
     for mut fog in &mut fog {
-        fog.falloff = crate::camera::air(if real_horizon {
+        let visibility = if real_horizon {
             crate::camera::CLEAR_M
         } else {
             crate::camera::HAZY_M
-        });
+        };
+        fog.falloff = crate::camera::air(visibility, &look);
     }
     let (sky_center, sky_radius) = (
         (sky_min + sky_max) / 2.0,
@@ -758,10 +763,11 @@ fn spawn_world(
             &mut rng,
         );
     }
+    let clouds = sky::cloud_material(&mut materials, &look);
     sky::spawn(
         &mut commands,
         &mut meshes,
-        &mut materials,
+        clouds,
         sky_center,
         sky_radius,
         ground_y,

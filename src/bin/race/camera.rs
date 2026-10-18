@@ -220,7 +220,7 @@ fn spawn_camera(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             color: SKY,
             directional_light_color: Color::srgba(1.0, 0.9, 0.7, 0.4),
             directional_light_exponent: 20.0,
-            falloff: air(HAZY_M),
+            falloff: air(HAZY_M, &crate::world::Daylight::Midday.look()),
         },
     ));
 }
@@ -230,12 +230,12 @@ pub const HAZY_M: f32 = 3800.0;
 pub const CLEAR_M: f32 = 18_000.0;
 
 /// Air: distant hills turn blue and fade into the haze, so the view
-/// doesn't run on for ever.
-pub fn air(visibility: f32) -> FogFalloff {
+/// doesn't run on for ever. Mist and evening haze shorten the view.
+pub fn air(visibility: f32, look: &crate::world::sky::Look) -> FogFalloff {
     FogFalloff::from_visibility_colors(
-        visibility,
-        Color::srgb(0.32, 0.45, 0.62),
-        Color::srgb(0.78, 0.83, 0.9),
+        visibility * look.clarity,
+        look.extinction,
+        look.inscattering,
     )
 }
 

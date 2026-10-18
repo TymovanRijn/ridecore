@@ -117,7 +117,7 @@ pub fn shrub(t: &mut Tris, center: Vec3, radii: Vec3, color: Rgba, rng: &mut Rng
 /// One rounded lump of a crown. Normals blend the lump's own with the whole
 /// crown's, and color darkens towards the crown's bottom and center.
 #[allow(clippy::too_many_arguments)]
-fn lump(
+pub(super) fn lump(
     t: &mut Tris,
     center: Vec3,
     r: Vec3,

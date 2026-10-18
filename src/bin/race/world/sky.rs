@@ -1,6 +1,7 @@
-//! The far scenery: a ring of snow-capped mountains on the horizon (unless
-//! the route has real ones), a wide ground plane out to them, and slowly
-//! drifting clouds.
+//! The sky and the light: the time of day (sun, sky colors, haze), the
+//! far scenery (a ring of snow-capped mountains on the horizon unless the
+//! route has real ones, and a ground plane out to them) and slowly drifting
+//! clouds.
 
 use std::f32::consts::TAU;
 
@@ -99,49 +100,71 @@ pub fn mountains(
     ));
 }
 
-/// Slowly drifting clouds over the course.
+/// The material clouds share: white, glowing a little in the day's light.
+pub fn cloud_material(
+    materials: &mut Assets<StandardMaterial>,
+    look: &Look,
+) -> Handle<StandardMaterial> {
+    materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        emissive: look.cloud_glow,
+        perceptual_roughness: 1.0,
+        ..default()
+    })
+}
+
+/// Slowly drifting cumulus over the course: heaps of rounded puffs on a
+/// flat base, bright on top and grey underneath.
 pub fn spawn(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
+    material: Handle<StandardMaterial>,
     center: Vec2,
     radius: f32,
     base_y: f32,
     rng: &mut Rng,
 ) {
-    // Clouds: a few puffs each, lit softly so they read as bright.
-    let white = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 1.0, 1.0),
-        emissive: LinearRgba::rgb(0.6, 0.62, 0.65),
-        perceptual_roughness: 1.0,
-        ..default()
-    });
-    for _ in 0..34 {
-        let mut puff = Tris::default();
-        for _ in 0..rng.range(3.0, 6.0) as usize {
+    for _ in 0..40 {
+        let mut cloud = Tris::default();
+        let size = rng.range(0.7, 1.4);
+        let whole = Vec3::new(70.0, 30.0, 45.0) * size;
+        let middle = Vec3::Y * whole.y * 0.5;
+        for k in 0..rng.range(5.0, 9.0) as usize {
+            // Puffs heap up towards the middle; the biggest ones first.
+            let x = rng.range(-1.0, 1.0);
             let o = Vec3::new(
-                rng.range(-45.0, 45.0),
-                rng.range(-6.0, 8.0),
-                rng.range(-25.0, 25.0),
+                x * whole.x * 0.65,
+                rng.range(0.15, 0.6) * whole.y * (1.0 - x.abs() * 0.6),
+                rng.range(-0.5, 0.5) * whole.z,
             );
-            let s = rng.range(22.0, 42.0);
-            props::blob(&mut puff, o, Vec3::new(s * 1.4, s * 0.55, s), [1.0; 4]);
+            let r = rng.range(0.45, 0.65) * (1.0 - k as f32 * 0.05) * whole.y;
+            super::trees::lump(
+                &mut cloud,
+                o,
+                Vec3::new(r * 1.3, r, r * 1.15),
+                middle,
+                whole,
+                8,
+                5,
+                [1.0; 4],
+                rng,
+            );
         }
         let a = rng.range(0.0, TAU);
-        let r = rng.range(0.0, radius + 600.0);
+        let r = rng.range(0.0, radius + 900.0);
         let pos = Vec3::new(
             center.x + a.cos() * r,
-            base_y + rng.range(240.0, 420.0),
+            base_y + rng.range(320.0, 650.0),
             center.y + a.sin() * r,
         );
         commands.spawn((
             Cloud {
                 speed: rng.range(2.0, 5.0),
                 center,
-                span: radius + 900.0,
+                span: radius + 1200.0,
             },
-            Mesh3d(meshes.add(puff.mesh())),
-            MeshMaterial3d(white.clone()),
+            Mesh3d(meshes.add(cloud.mesh())),
+            MeshMaterial3d(material.clone()),
             Transform::from_translation(pos),
             WorldPart,
             NotShadowCaster,
@@ -158,12 +181,108 @@ pub fn drift_clouds(time: Res<Time>, mut clouds: Query<(&Cloud, &mut Transform)>
     }
 }
 
-/// Where the sun stands; the sun light shines the opposite way.
-pub fn sun_direction() -> Vec3 {
-    Vec3::new(0.45, 0.7, 0.35).normalize()
+/// The time of day you ride at.
+#[derive(Resource, Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum Daylight {
+    /// Low sun, cool air and morning mist.
+    Morning,
+    #[default]
+    Midday,
+    /// Golden hour: a low, orange sun and long shadows.
+    Evening,
 }
 
-/// Sky color at horizon height, also used for the haze.
+/// Everything about the light that changes with the time of day.
+pub struct Look {
+    /// Where the sun stands; its light shines the opposite way.
+    pub sun: Vec3,
+    pub sun_color: Color,
+    pub lux: f32,
+    pub ambient: Color,
+    pub ambient_brightness: f32,
+    zenith: Color,
+    /// Sky color at the horizon, also used for the haze.
+    pub horizon: Color,
+    /// Added around the sun: (color, how far it spreads over the sky).
+    glow: (LinearRgba, f32),
+    /// Haze colors: what distant land fades to, and the light it scatters.
+    pub extinction: Color,
+    pub inscattering: Color,
+    /// Sunlit haze when looking towards the sun.
+    pub fog_sun: Color,
+    /// How clear the air is, as a share of a clear midday.
+    pub clarity: f32,
+    pub cloud_glow: LinearRgba,
+}
+
+impl Daylight {
+    pub const ALL: [Daylight; 3] = [Daylight::Morning, Daylight::Midday, Daylight::Evening];
+
+    /// `RIDECORE_DAYLIGHT=morning|midday|evening`, for test runs.
+    pub fn from_env() -> Option<Self> {
+        match std::env::var("RIDECORE_DAYLIGHT").ok()?.as_str() {
+            "morning" => Some(Daylight::Morning),
+            "midday" => Some(Daylight::Midday),
+            "evening" => Some(Daylight::Evening),
+            _ => None,
+        }
+    }
+
+    pub fn look(self) -> Look {
+        // Sun at an elevation and an azimuth, in radians.
+        let sun = |el: f32, az: f32| Vec3::new(el.cos() * az.cos(), el.sin(), el.cos() * az.sin());
+        match self {
+            Daylight::Morning => Look {
+                sun: sun(0.45, -0.7),
+                sun_color: Color::srgb(1.0, 0.91, 0.77),
+                lux: 9_000.0,
+                ambient: Color::srgb(0.74, 0.82, 1.0),
+                ambient_brightness: 520.0,
+                zenith: Color::srgb(0.3, 0.5, 0.84),
+                horizon: Color::srgb(0.83, 0.85, 0.89),
+                glow: (LinearRgba::rgb(1.0, 0.7, 0.4), 0.18),
+                extinction: Color::srgb(0.45, 0.52, 0.64),
+                inscattering: Color::srgb(0.87, 0.87, 0.88),
+                fog_sun: Color::srgba(1.0, 0.85, 0.6, 0.6),
+                clarity: 0.6,
+                cloud_glow: LinearRgba::rgb(0.55, 0.5, 0.47),
+            },
+            Daylight::Midday => Look {
+                sun: Vec3::new(0.45, 0.7, 0.35).normalize(),
+                sun_color: Color::srgb(1.0, 0.96, 0.88),
+                lux: 9_000.0,
+                ambient: Color::srgb(0.75, 0.85, 1.0),
+                ambient_brightness: 450.0,
+                zenith: Color::srgb(0.22, 0.42, 0.80),
+                horizon: HAZE,
+                glow: (LinearRgba::rgb(1.0, 0.78, 0.5), 0.0),
+                extinction: Color::srgb(0.32, 0.45, 0.62),
+                inscattering: Color::srgb(0.78, 0.83, 0.9),
+                fog_sun: Color::srgba(1.0, 0.9, 0.7, 0.4),
+                clarity: 1.0,
+                cloud_glow: LinearRgba::rgb(0.5, 0.52, 0.55),
+            },
+            Daylight::Evening => Look {
+                sun: sun(0.24, 2.3),
+                sun_color: Color::srgb(1.0, 0.78, 0.55),
+                lux: 7_500.0,
+                ambient: Color::srgb(0.7, 0.7, 0.9),
+                ambient_brightness: 400.0,
+                zenith: Color::srgb(0.2, 0.33, 0.62),
+                horizon: Color::srgb(0.9, 0.79, 0.7),
+                glow: (LinearRgba::rgb(1.0, 0.55, 0.25), 0.35),
+                extinction: Color::srgb(0.38, 0.4, 0.55),
+                inscattering: Color::srgb(0.9, 0.8, 0.72),
+                fog_sun: Color::srgba(1.0, 0.65, 0.35, 0.7),
+                clarity: 0.85,
+                cloud_glow: LinearRgba::rgb(0.6, 0.42, 0.34),
+            },
+        }
+    }
+}
+
+/// Sky color at horizon height on a clear midday, also the haze before a
+/// race starts.
 pub const HAZE: Color = Color::srgb(0.70, 0.79, 0.90);
 
 /// The sky dome and sun travel with the camera.
@@ -173,19 +292,66 @@ pub struct SkyDome;
 /// Beyond the farthest mountains.
 const DOME_R: f32 = 45_000.0;
 
-/// A gradient sky from deep blue overhead to pale haze at the horizon,
-/// warmer around the sun, plus a glowing sun disk.
+/// The midday sky until a race picks its time of day.
 pub fn spawn_dome(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    dome(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &Daylight::Midday.look(),
+    );
+}
+
+/// Sets the race's time of day: sun, ambient light, haze and sky.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_daylight(
+    daylight: Res<Daylight>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut suns: Query<(&mut DirectionalLight, &mut Transform)>,
+    mut fog: Query<&mut DistanceFog>,
+    mut clear: ResMut<ClearColor>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+    domes: Query<Entity, With<SkyDome>>,
+) {
+    let look = daylight.look();
+    for (mut light, mut t) in &mut suns {
+        light.color = look.sun_color;
+        light.illuminance = look.lux;
+        *t = Transform::default().looking_at(-look.sun, Vec3::Y);
+    }
+    for mut f in &mut fog {
+        f.color = look.horizon;
+        f.directional_light_color = look.fog_sun;
+    }
+    clear.0 = look.horizon;
+    ambient.color = look.ambient;
+    ambient.brightness = look.ambient_brightness;
+    for d in &domes {
+        commands.entity(d).despawn();
+    }
+    dome(&mut commands, &mut meshes, &mut materials, &look);
+}
+
+/// A gradient sky from deep blue overhead to pale haze at the horizon,
+/// warmer around the sun, plus a glowing sun disk.
+fn dome(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    look: &Look,
+) {
     use bevy::asset::RenderAssetUsages;
     use bevy::mesh::{Indices, PrimitiveTopology};
-    let sun = sun_direction();
-    let zenith = LinearRgba::from(Color::srgb(0.22, 0.42, 0.80));
-    let horizon = LinearRgba::from(HAZE);
-    let glow = LinearRgba::rgb(1.0, 0.78, 0.5);
+    let sun = look.sun;
+    let zenith = LinearRgba::from(look.zenith);
+    let horizon = LinearRgba::from(look.horizon);
+    let (glow, spread) = look.glow;
     let (rings, segs) = (48, 96);
     let mut pos = Vec::new();
     let mut col = Vec::new();
@@ -199,7 +365,9 @@ pub fn spawn_dome(
             let t = up.powf(0.45);
             let mut c = horizon * (1.0 - t) + zenith * t;
             let s_dot = dir.dot(sun).max(0.0);
-            c += glow * (s_dot.powi(6) * 0.25 + s_dot.powi(64) * 0.9);
+            // A low sun warms a wide band of the sky near the horizon.
+            let band = s_dot.powi(2) * (1.0 - t) * spread;
+            c += glow * (band + s_dot.powi(6) * 0.25 + s_dot.powi(64) * 0.9);
             pos.push((dir * DOME_R).to_array());
             col.push(c.to_f32_array());
         }
@@ -227,9 +395,10 @@ pub fn spawn_dome(
         cull_mode: None,
         ..default()
     });
+    let disk_color = LinearRgba::from(look.sun_color) * 16.0;
     let disk = materials.add(StandardMaterial {
-        // Far brighter than white, so the bloom gives it a halo.
-        base_color: Color::linear_rgb(18.0, 15.0, 11.0),
+        // Far brighter than white, so it glows through the haze.
+        base_color: disk_color.into(),
         unlit: true,
         fog_enabled: false,
         ..default()

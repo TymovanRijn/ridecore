@@ -17,6 +17,7 @@ use ridecore::training::{Focus, Plan, library};
 use crate::builder::{Action, Builder, builder_ui};
 use crate::link::{InputSettings, Trainer};
 use crate::theme::{self, ACCENT, ACCENT_SOFT, MUTED, TEXT, card, chip, display, stat};
+use crate::world::Daylight;
 use crate::{RaceRes, Screen};
 
 const KINDS: [RiderKind; 4] = [
@@ -43,6 +44,7 @@ pub struct SetupForm {
     pub kind: RiderKind,
     pub route: usize,
     pub laps: u32,
+    pub daylight: Daylight,
     pub team_count: usize,
     pub riders_per_team: usize,
     /// Field strength as a multiple of your W/kg.
@@ -117,6 +119,7 @@ impl Default for SetupForm {
             // The first course in the catalog: Alpe d'Huez (14 km).
             route: 0,
             laps: 2,
+            daylight: Daylight::default(),
             team_count: 8,
             riders_per_team: 6,
             difficulty: 1.0,
@@ -315,6 +318,7 @@ impl Plugin for SetupPlugin {
         app.init_resource::<SetupForm>()
             .add_systems(Startup, autostart)
             .add_systems(Update, import_dropped.run_if(in_state(Screen::Setup)))
+            .add_systems(OnExit(Screen::Setup), pick_daylight)
             .add_systems(
                 EguiPrimaryContextPass,
                 setup_ui
@@ -322,6 +326,12 @@ impl Plugin for SetupPlugin {
                     .run_if(crate::theme::ready),
             );
     }
+}
+
+/// The ride takes the time of day picked on the course card
+/// (`RIDECORE_DAYLIGHT` overrides it for test runs).
+fn pick_daylight(form: Res<SetupForm>, mut daylight: ResMut<Daylight>) {
+    *daylight = Daylight::from_env().unwrap_or(form.daylight);
 }
 
 /// Development shortcut: `RIDECORE_AUTOSTART=1` starts a keyboard-mode race
@@ -908,6 +918,19 @@ fn course_card(ui: &mut egui::Ui, form: &mut SetupForm) {
                 .color(MUTED),
             );
         }
+        ui.horizontal(|ui| {
+            ui.label(t("Tijdstip", "Time of day"));
+            for d in Daylight::ALL {
+                let name = match d {
+                    Daylight::Morning => t("Ochtend", "Morning"),
+                    Daylight::Midday => t("Middag", "Midday"),
+                    Daylight::Evening => t("Avond", "Evening"),
+                };
+                if ui.selectable_label(form.daylight == d, name).clicked() {
+                    form.daylight = d;
+                }
+            }
+        });
     });
 }
 
