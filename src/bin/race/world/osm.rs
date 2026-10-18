@@ -1,6 +1,7 @@
 //! The real landscape from OpenStreetMap: woods where the map has woods
-//! (real trees near the road, a canopy further out so forests read as
-//! forests from far away), the real buildings, side roads and rivers.
+//! (detailed trees near the road, simple ones further out, over a forest
+//! floor the surface shader draws as treetops), the real buildings, side
+//! roads and rivers.
 //!
 //! Data © OpenStreetMap contributors (ODbL).
 
@@ -12,7 +13,7 @@ use ridecore::map::{BuildingKind, Cover, MapData, RoadClass};
 use ridecore::rng::Rng;
 
 use super::ground::Grid;
-use super::props::{self, Rgba, leaf, rgb};
+use super::props::{self, Rgba, forest_floor, leaf, rgb};
 use super::{ROAD_HALF, RoadIndex, Tris, fbm};
 
 /// The road's own corridor: nothing from the map is built this close.
@@ -28,7 +29,7 @@ pub fn cover_color(cover: Cover, p: Vec3) -> Option<Rgba> {
     let m = fbm(p.x / 55.0, p.z / 55.0 - 9.0) * 0.5 + 0.5;
     Some(match cover {
         Cover::Unknown => return None,
-        Cover::Forest => rgb(0.15 + k, 0.25 + 0.04 * m + k, 0.11),
+        Cover::Forest => forest_floor(rgb(0.13 + k, 0.23 + 0.04 * m + k, 0.1)),
         Cover::Farmland => super::zones::field_color(p.x, p.z, 0x5eed),
         Cover::Meadow => rgb(0.31 + k + 0.04 * m, 0.55 + 0.08 * m + k, 0.21),
         // Gardens and hedges between the houses.
@@ -95,8 +96,20 @@ fn beech(t: &mut Tris, p: Vec3, s: f32, near: bool, rng: &mut Rng) {
     }
 }
 
-/// Trees where the map has woods, densest along the road.
-pub fn forest_trees(t: &mut Tris, index: &RoadIndex, map: &MapData, rng: &mut Rng) {
+/// A distant tree: a single cone, cheap enough to fill the hillsides.
+fn far_tree(t: &mut Tris, p: Vec3, s: f32, conifer: bool, rng: &mut Rng) {
+    if conifer {
+        let g = *rng.pick(&SPRUCE);
+        props::cone(t, p + Vec3::Y * s, 2.6 * s, 10.0 * s, 5, g);
+    } else {
+        let g = *rng.pick(&BEECH);
+        props::cone(t, p + Vec3::Y * 1.5 * s, 4.2 * s, 8.0 * s, 5, g);
+    }
+}
+
+/// Trees where the map has woods, densest along the road. Distant ones go
+/// in `far`, which casts no shadows.
+pub fn forest_trees(t: &mut Tris, far: &mut Tris, index: &RoadIndex, map: &MapData, rng: &mut Rng) {
     let (min, max) = index.extent(900.0);
     // Sample on a jittered grid; spacing grows with distance from the road.
     let cell = 7.0;
@@ -117,6 +130,8 @@ pub fn forest_trees(t: &mut Tris, index: &RoadIndex, map: &MapData, rng: &mut Rn
                 d if d < CLEAR_M + 1.0 => 0.0,
                 d if d < 70.0 => 0.95,
                 d if d < 160.0 => 0.35,
+                d if d < 210.0 => 0.25,
+                d if d < 600.0 => 0.06,
                 _ => 0.0,
             };
             if !rng.chance(keep) {
@@ -125,105 +140,13 @@ pub fn forest_trees(t: &mut Tris, index: &RoadIndex, map: &MapData, rng: &mut Rn
             let p = Vec3::new(x, index.surface(x, z) - 0.2, z);
             // Spruce plantations and beech woods come in patches.
             let s = rng.range(0.85, 1.35);
-            if fbm(x / 160.0 + 7.0, z / 160.0) > 0.0 {
-                spruce(t, p, s, n.dist < 45.0, rng);
-            } else {
-                beech(t, p, s, n.dist < 45.0, rng);
+            let conifer = fbm(x / 160.0 + 7.0, z / 160.0) > 0.0;
+            match (conifer, n.dist) {
+                (_, d) if d > 210.0 => far_tree(far, p, s * 1.15, conifer, rng),
+                (true, d) => spruce(t, p, s, d < 45.0, rng),
+                (false, d) => beech(t, p, s, d < 45.0, rng),
             }
         }
-    }
-}
-
-/// Forest canopy beyond the roadside trees: a lumpy dark-green blanket
-/// over the wooded cells with walls at the forest edge, so woods fill the
-/// hills all the way to the horizon at a tiny cost.
-pub fn canopy(index: &RoadIndex, map: &MapData) -> (Grid, Tris) {
-    let geo = index.geo.as_ref().expect("real route");
-    let [x0, z0, x1, z1] = geo.bounds();
-    let step = 40.0;
-    let (nx, nz) = (((x1 - x0) / step) as i32, ((z1 - z0) / step) as i32);
-    let wooded = |i: i32, j: i32| {
-        let (x, z) = (x0 + (i as f32 + 0.5) * step, z0 + (j as f32 + 0.5) * step);
-        let corners = [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)];
-        let hits = corners
-            .iter()
-            .filter(|(a, b)| map.cover(x + a * step, z + b * step) == Cover::Forest)
-            .count();
-        // Near the road the real trees stand; the canopy starts behind them.
-        hits >= 3 && index.near(x, z).dist > 130.0
-    };
-    let top = |x: f32, z: f32| {
-        let lump = fbm(x / 35.0, z / 35.0) * 7.0 + super::hash(x as i32, z as i32) * 2.5;
-        geo.height(x, z).unwrap_or(0.0) + 15.0 + lump
-    };
-    let mut grid = Grid::default();
-    let mut walls = Tris::default();
-    let edge = leaf(0.1, 0.22, 0.11);
-    for j in 0..nz {
-        for i in 0..nx {
-            if !wooded(i, j) {
-                continue;
-            }
-            let at = |i: i32, j: i32| {
-                let (x, z) = (x0 + i as f32 * step, z0 + j as f32 * step);
-                Vec3::new(x, top(x, z), z)
-            };
-            let a = grid.corner((i, j), || at(i, j));
-            let b = grid.corner((i + 1, j), || at(i + 1, j));
-            let c = grid.corner((i + 1, j + 1), || at(i + 1, j + 1));
-            let d = grid.corner((i, j + 1), || at(i, j + 1));
-            grid.cell(a, b, c, d);
-            // Walls down to the ground where the wood ends.
-            let down = Vec3::Y * 26.0;
-            for ((di, dj), (p, q)) in [
-                ((0, -1), (at(i, j), at(i + 1, j))),
-                ((1, 0), (at(i + 1, j), at(i + 1, j + 1))),
-                ((0, 1), (at(i + 1, j + 1), at(i, j + 1))),
-                ((-1, 0), (at(i, j + 1), at(i, j))),
-            ] {
-                if !wooded(i + di, j + dj) {
-                    let inside = Vec3::new(
-                        x0 + (i as f32 + 0.5) * step,
-                        (p.y + q.y) / 2.0 - 13.0,
-                        z0 + (j as f32 + 0.5) * step,
-                    );
-                    props::quad_out(&mut walls, [p, q, q - down, p - down], inside, edge);
-                    // A row of tall trees in front of the wall, so the
-                    // wood ends in treetops rather than a straight edge.
-                    let out = Vec3::new(di as f32, 0.0, dj as f32);
-                    for k in 0..3 {
-                        let r = |salt: i32| {
-                            super::hash(i * 31 + k * 7 + salt, j * 17 + di * 5 + dj * 3)
-                        };
-                        let along = p + (q - p) * ((k as f32 + 0.5 + r(1) * 0.3) / 3.0);
-                        let at = along + out * (2.0 + r(2) * 2.0);
-                        let ground = geo.height(at.x, at.z).unwrap_or(along.y - 15.0);
-                        let tall = (along.y - ground) * (1.05 + r(3) * 0.15);
-                        props::cone(
-                            &mut walls,
-                            Vec3::new(at.x, ground + 2.0, at.z),
-                            5.5 + r(4) * 1.5,
-                            tall,
-                            6,
-                            canopy_color(at),
-                        );
-                    }
-                }
-            }
-        }
-    }
-    (grid, walls)
-}
-
-pub fn canopy_color(p: Vec3) -> Rgba {
-    let k = fbm(p.x / 60.0, p.z / 60.0) * 0.08;
-    // Crown to crown variation.
-    let crown = super::hash((p.x / 40.0) as i32, (p.z / 40.0) as i32) * 0.05;
-    let spruce = fbm(p.x / 160.0 + 7.0, p.z / 160.0) > 0.0;
-    if spruce {
-        leaf(0.12 + k + crown, 0.27 + k + crown, 0.15)
-    } else {
-        leaf(0.25 + k + crown, 0.42 + k + crown, 0.17)
     }
 }
 

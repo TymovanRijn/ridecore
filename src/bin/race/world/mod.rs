@@ -310,7 +310,9 @@ impl RoadIndex {
         let near_road = n.dist < 220.0;
         match n.zone {
             Zone::Farmland if near_road && n.dist > 11.0 => zones::field_color(p.x, p.z, n.seed),
-            Zone::Forest if near_road => rgb(0.2 + k, 0.36 + 0.06 * m + k, 0.16),
+            Zone::Forest if near_road => {
+                props::forest_floor(rgb(0.2 + k, 0.36 + 0.06 * m + k, 0.16))
+            }
             Zone::Rocky if near_road => rgb(0.42 + k, 0.47 + 0.05 * m + k, 0.3),
             Zone::Meadow if near_road => rgb(0.36 + k, 0.64 + 0.08 * m + k, 0.26),
             _ => rgb(0.30 + 0.12 * m + k, 0.52 + 0.14 * m + k, 0.22 + 0.06 * m),
@@ -570,6 +572,7 @@ fn spawn_world(
     };
 
     let mut scenery = Tris::default();
+    let mut far_trees = Tris::default();
     let mut rng = Rng::new(11);
     let map = index.map();
     let sails = roadside(&mut scenery, &index, course, &mut rng);
@@ -578,7 +581,7 @@ fn spawn_world(
         // The real landscape: woods, buildings, roads, rivers and cows where
         // the map has them.
         Some(map) => {
-            osm::forest_trees(&mut scenery, &index, map, &mut rng);
+            osm::forest_trees(&mut scenery, &mut far_trees, &index, map, &mut rng);
             osm::buildings(&mut scenery, &index, map, &mut rng);
             osm::herds(&mut scenery, &index, map, &mut rng);
             let roads = osm::side_roads(&index, map);
@@ -588,23 +591,6 @@ fn spawn_world(
                     &mut meshes,
                     tile.mesh(),
                     vertex_colored.clone(),
-                    false,
-                );
-            }
-            let (canopy, edges) = osm::canopy(&index, map);
-            if !canopy.is_empty() {
-                part(
-                    &mut commands,
-                    &mut meshes,
-                    canopy.mesh(|p, _| osm::canopy_color(p)),
-                    scenery_surface.clone(),
-                    false,
-                );
-                part(
-                    &mut commands,
-                    &mut meshes,
-                    edges.mesh(),
-                    scenery_surface.clone(),
                     false,
                 );
             }
@@ -637,6 +623,22 @@ fn spawn_world(
             scenery_surface.clone(),
             true,
         );
+    }
+    // Distant woods: only the stretch around the camera, fading out
+    // further away where the forest floor carries the look.
+    for tile in far_trees.split(TILE_M) {
+        commands.spawn((
+            Mesh3d(meshes.add(tile.mesh())),
+            MeshMaterial3d(scenery_surface.clone()),
+            Transform::default(),
+            WorldPart,
+            NotShadowCaster,
+            VisibilityRange {
+                start_margin: 0.0..0.0,
+                end_margin: 650.0..850.0,
+                use_aabb: true,
+            },
+        ));
     }
     for tile in stones.split(TILE_M) {
         part(
@@ -890,6 +892,8 @@ fn horizon_terrain(geo: &Geo) -> Option<Grid> {
                 let Some(h) = h.or_else(|| geo.horizon_height(x, z)) else {
                     break;
                 };
+                // The elevation data has the sea floor; draw the surface.
+                let h = h.max(0.0);
                 ids[k] = grid.corner((a, b), || Vec3::new(x, h, z));
             }
             grid.cell(ids[0], ids[1], ids[2], ids[3]);
@@ -898,10 +902,16 @@ fn horizon_terrain(geo: &Geo) -> Option<Grid> {
     (!grid.is_empty()).then_some(grid)
 }
 
+/// Open water in the distance; the alpha tells the surface shader it's water.
+const SEA: Rgba = [0.04, 0.12, 0.17, 0.0];
+
 /// Distant slopes by height: farmland in the valleys, dark forest up the
 /// sides, alpine grass above the tree line and scree towards the summits.
 /// The surface shader adds the cliffs and the snow.
 fn far_color(p: Vec3, n: Vec3) -> Rgba {
+    if p.y < 0.5 {
+        return SEA;
+    }
     let k = fbm(p.x / 1500.0, p.z / 1500.0) * 0.05;
     let mix = |a: [f32; 3], b: [f32; 3], t: f32| {
         let t = t.clamp(0.0, 1.0);

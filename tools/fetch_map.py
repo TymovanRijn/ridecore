@@ -73,7 +73,9 @@ def cover_of(tags):
     return None
 
 
-def overpass(query):
+def overpass(query, must_find=False):
+    """Runs an Overpass query (cached). With `must_find`, an empty answer
+    counts as a failure: a busy server sometimes returns nothing at all."""
     key = "osm_" + hashlib.sha1(query.encode()).hexdigest()
     path = os.path.join(CACHE, key + ".json")
     if os.path.exists(path):
@@ -85,6 +87,8 @@ def overpass(query):
             req = urllib.request.Request(OVERPASS, data=data, headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=300) as r:
                 out = json.load(r)
+            if must_find and not out.get("elements"):
+                raise RuntimeError("empty answer")
             break
         except Exception as e:
             wait = 20 * (attempt + 1)
@@ -243,7 +247,7 @@ def build(route_id):
   relation["waterway"="river"]{around(line, COVER_REACH_M)};
 );
 out geom;"""
-    cover = overpass(q_cover)
+    cover = overpass(q_cover, must_find=True)
     areas, rivers = [], []
     for el in cover["elements"]:
         tags = el.get("tags", {})

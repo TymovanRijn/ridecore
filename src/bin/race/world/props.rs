@@ -21,6 +21,12 @@ pub const fn leaf(r: f32, g: f32, b: f32) -> Rgba {
     [r, g, b, 0.5]
 }
 
+/// Ground under trees: the surface shader draws it as treetops seen from
+/// above (alpha marks it).
+pub const fn forest_floor(c: Rgba) -> Rgba {
+    [c[0], c[1], c[2], 0.75]
+}
+
 /// Adds a triangle facing away from `inside`, whatever order the corners
 /// are given in, so closed solids are always lit from outside.
 pub fn tri_out(t: &mut Tris, a: Vec3, b: Vec3, c: Vec3, inside: Vec3, color: Rgba) {
