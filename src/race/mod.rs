@@ -30,7 +30,7 @@ const MAX_SUBSTEP: f32 = 0.05;
 /// How often riders and team directors re-plan.
 const AI_INTERVAL: f32 = 0.5;
 /// Riders at the front of a group look this far up the road for a gap to close.
-const BRIDGE_REACH_M: f32 = 80.0;
+const BRIDGE_REACH_M: f32 = 250.0;
 /// Riders crossing the line within this many seconds share a finish time.
 const SAME_TIME_GAP_S: f32 = 1.0;
 
@@ -47,6 +47,8 @@ pub struct Rider {
     /// Meters right of the road center.
     pub lateral: f32,
     pub speed: f32,
+    /// Change of speed over the last substep, m/s².
+    pub accel: f32,
     pub power: f32,
     pub cadence: f32,
     /// Current drag reduction from drafting, 0..1.
@@ -58,7 +60,8 @@ pub struct Rider {
     /// Most power this rider can hold to the top of the current climb; above
     /// it they let the wheel go and ride their own tempo.
     pub limit_w: f32,
-    /// Wants to move up in the bunch (finale positioning).
+    /// Wants to move up in the bunch (finale positioning); such riders come
+    /// up the side of the bunch instead of being boxed in.
     pub move_up: bool,
 }
 
@@ -174,6 +177,10 @@ pub struct Race {
     pub(crate) break_up: bool,
     /// Race time when the last breakaway was caught (counter-attack window).
     pub(crate) last_catch: f32,
+    /// Race time of the last spontaneous attack.
+    pub(crate) last_attack: f32,
+    /// Rivals marking the player's last attack stay on it until then.
+    pub(crate) player_marked_until: f32,
 }
 
 impl Race {
@@ -222,6 +229,7 @@ impl Race {
                     dist: 0.0,
                     lateral: 0.0,
                     speed: 0.0,
+                    accel: 0.0,
                     power: 0.0,
                     cadence: 0.0,
                     draft: 0.0,
@@ -264,6 +272,8 @@ impl Race {
             director_timer: 0.0,
             break_up: false,
             last_catch: -1_000.0,
+            last_attack: -1_000.0,
+            player_marked_until: -1_000.0,
         };
         race.groups = pack::find_groups(&race.riders);
         race
@@ -372,6 +382,7 @@ impl Race {
             };
             state.step(&r.bike, power, grade, r.draft, h);
             let prev = r.dist;
+            r.accel = (state.speed - r.speed) / h;
             r.speed = state.speed;
             r.dist = state.distance;
             self.check_lines(i, prev);

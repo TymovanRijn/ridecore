@@ -36,12 +36,14 @@ impl Energy {
     }
 
     /// Highest power available right now. A full tank allows `peak`; an empty
-    /// one leaves the rider just under CP, so efforts fade as W′ drains.
+    /// one leaves the rider just under CP, so efforts fade as W′ drains. A
+    /// short sprint draws mostly on fast-recovering stores, so a half-empty
+    /// tank still allows most of it.
     pub fn max_power(&self, peak: f32) -> f32 {
         if self.balance <= 0.0 {
             return self.cp * 0.97;
         }
-        self.cp + (peak - self.cp) * self.fraction().sqrt()
+        self.cp + (peak - self.cp) * self.fraction().powf(0.35)
     }
 }
 
@@ -71,5 +73,15 @@ mod tests {
         e.step(1300.0, 10.0);
         assert_eq!(e.balance, 0.0);
         assert!(e.max_power(1200.0) < 300.0);
+    }
+
+    #[test]
+    fn half_a_tank_still_allows_most_of_a_sprint() {
+        let mut e = Energy::new(300.0, 20_000.0);
+        e.balance = 10_000.0;
+        let kick = e.max_power(1500.0);
+        assert!(kick > 1200.0 && kick < 1500.0, "{kick}");
+        e.balance = 1_000.0;
+        assert!(e.max_power(1500.0) < 900.0);
     }
 }

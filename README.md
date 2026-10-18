@@ -55,13 +55,17 @@ On macOS, `tools/make_app.sh` puts a `RideCore.app` on your Desktop. Opening it 
 - `cargo run --release --bin click_probe`: shows the button presses and battery level of a Zwift Click.
 - `RIDECORE_LANG=en` or `RIDECORE_LANG=nl`: forces the language.
 - `RIDECORE_DEBUG=1`: logs raw Bluetooth traffic. Each ride also writes a trainer log to `~/Library/Logs/RideCore-trainer.csv`.
+- `cargo run --release --example race_lab`: races the AI riders against each other a few hundred times, about 13,000× faster than real time, and checks the results against real road racing (bunch sprints on flat courses, climbers on summit finishes, how often riders attack). Run it after changing the race AI.
+- `cargo run --release --example race_story flat-loop 4 7 even`: tells one of those races minute by minute, to see why it went the way it did.
 
 ## Project layout
 
 ```
 src/            core library: Bluetooth (FTMS, Zwift Click and trainer protocol),
                 trainer control, physics, routes, workouts, FIT, Strava
-src/bin/race/   the game: 3D world, AI riders, HUD, training mode and games
+src/race/       the race simulation: physics in the bunch, drafting, AI tactics
+src/bin/race/   the game: 3D world, rider models, HUD, training mode and games
+examples/       the race lab and race story tools
 assets/         routes, map data and fonts (embedded in the binary at build time)
 tools/          scripts that build the routes, the map data and the macOS app
 ```

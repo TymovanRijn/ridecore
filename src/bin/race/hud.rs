@@ -207,18 +207,20 @@ fn hud(
                     // Shelter meter: glows green when you're well in the wheels.
                     let sheltered = me.draft > 0.25;
                     ui.add(
-                        egui::ProgressBar::new((me.draft / 0.5).min(1.0))
-                            .desired_width(110.0)
-                            .fill(if sheltered {
-                                egui::Color32::from_rgb(80, 220, 120)
-                            } else {
-                                egui::Color32::GRAY
-                            })
-                            .text(if sheltered {
-                                t("In het wiel", "Sheltered")
-                            } else {
-                                "Wind"
-                            }),
+                        egui::ProgressBar::new(
+                            (me.draft / ridecore::race::pack::DRAFT_MAX).min(1.0),
+                        )
+                        .desired_width(110.0)
+                        .fill(if sheltered {
+                            egui::Color32::from_rgb(80, 220, 120)
+                        } else {
+                            egui::Color32::GRAY
+                        })
+                        .text(if sheltered {
+                            t("In het wiel", "Sheltered")
+                        } else {
+                            "Wind"
+                        }),
                     );
                     let road = race.course.smooth_grade_pct(me.dist);
                     ui.label(

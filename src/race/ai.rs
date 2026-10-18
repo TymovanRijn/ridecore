@@ -101,8 +101,25 @@ const DIRECTOR_INTERVAL: f32 = 2.0;
 const FOLLOW_GAP_M: f32 = super::pack::MIN_GAP_M + 0.3;
 /// Grade (percent, averaged ahead) above which the road counts as a climb.
 const CLIMB_PCT: f32 = 3.5;
+/// A chase rides this much faster than the break to keep it on its leash...
+const CHASE_CLOSING_MPS: f32 = 0.6;
+/// ...and at most this much faster to bring it back.
+const MAX_CHASE_CLOSING_MPS: f32 = 2.5;
+/// How long rivals stay on the player's wheel after marking an attack.
+const PLAYER_ATTACK_S: f32 = 30.0;
+/// Seconds after an attack before the next spontaneous one.
+const ATTACK_LULL_S: f32 = 20.0;
+/// Terrain, timing and tactics together make an attack at most this many
+/// times likelier than on an ordinary stretch of road.
+const MAX_ATTACK_BOOST: f32 = 8.0;
+/// Sprint teams form their lead-out train inside this distance.
+const LEADOUT_M: f64 = 3500.0;
+/// Roughly how much faster than the bunch a sprint goes, m/s.
+const SPRINT_GAIN_MPS: f32 = 4.0;
+/// Chasers pace their turns to last a chase of a few minutes.
+const CHASE_EFFORT_S: f32 = 180.0;
 /// The player riding this much under the group's pace gets passed...
-const EASING_MARGIN_MPS: f32 = 0.5;
+const EASING_MARGIN_MPS: f32 = 0.3;
 /// ...and this much over it is an attack most riders don't follow.
 const ATTACK_MARGIN_MPS: f32 = 0.8;
 
@@ -137,21 +154,31 @@ pub fn choose_plan(
     }
 }
 
-/// Distance before the line at which each rider type opens the sprint.
-fn launch_m(kind: RiderKind) -> f64 {
+/// Seconds before the line at which each rider type opens the sprint with
+/// a full tank: sprinters can hold their top speed longest.
+fn launch_s(kind: RiderKind) -> f32 {
     match kind {
-        RiderKind::Sprinter => 260.0,
-        RiderKind::Rouleur => 220.0,
-        RiderKind::Domestique => 180.0,
-        RiderKind::Climber => 160.0,
+        RiderKind::Sprinter => 14.0,
+        RiderKind::Rouleur => 12.0,
+        RiderKind::Domestique => 10.0,
+        RiderKind::Climber => 9.0,
     }
 }
 
+/// Distance before the line at which a rider opens the sprint: a fixed time
+/// at sprinting speed, shorter on tired legs, so a sprint from a slow bunch
+/// starts closer to the line than one off a fast lead-out.
+fn launch_m(r: &Rider) -> f64 {
+    let legs = (0.4 + r.energy.fraction()).min(1.0);
+    (launch_s(r.profile.kind) * legs * (r.speed + SPRINT_GAIN_MPS)) as f64
+}
+
 /// How big a gap (seconds) the bunch tolerates with `remaining_s` of racing
-/// left: a chase closes roughly a second every eight, and a break should be
-/// back about five minutes before the line.
+/// left: a steady chase takes back about a second every sixteen (a minute
+/// per ten kilometers or so), and a break should be back about five minutes
+/// before the line.
 pub fn allowed_gap_s(remaining_s: f32) -> f32 {
-    ((remaining_s - 300.0) / 8.0).clamp(5.0, 400.0)
+    ((remaining_s - 300.0) / 16.0).clamp(5.0, 300.0)
 }
 
 /// Power a rider can hold for `t_rem` more seconds: critical power plus
@@ -196,6 +223,7 @@ pub fn decide(race: &mut Race) {
         }
     }
     attacks(race, &sit);
+    player_attack(race, &sit);
     sprints(race, &sit);
 }
 
@@ -223,7 +251,11 @@ fn set_group_tempo(race: &mut Race) {
             let progress = progress_of(race, g.riders[0]);
             let build_up = progress.clamp(0.0, 0.6) / 0.6 * 0.06;
             let finale = ((progress - 0.85) / 0.15).clamp(0.0, 1.0) * 0.1;
-            let calm = gi == peloton && peloton > 0 && g.gap_s > CALM_BEHIND_BREAK_S;
+            let chasing = g
+                .riders
+                .iter()
+                .any(|&i| matches!(race.riders[i].intent, Intent::Pull { .. }));
+            let calm = gi == peloton && peloton > 0 && g.gap_s > CALM_BEHIND_BREAK_S && !chasing;
             let climbing = race
                 .course
                 .grade_ahead_pct(race.riders[g.riders[0]].dist, 300.0)
@@ -286,10 +318,15 @@ fn pacing(race: &mut Race, sit: &Situation) {
             .unwrap_or(0);
         let leader = race.teams[r.team].leader == i;
         let fast = matches!(r.profile.kind, RiderKind::Sprinter | RiderKind::Rouleur);
+        // Riders sent to the front to work move up the side of the bunch,
+        // and in the finale a sprinter goes with their lead-out train.
+        let train = matches!(r.intent, Intent::Pull { .. })
+            || race.remaining_m(i) < LEADOUT_M && leader && race.teams[r.team].plan == Plan::Sprint;
         let move_up = race.remaining_m(i) < 4000.0
             && place > 10
             && r.energy.fraction() > 0.3
-            && (fast || leader);
+            && (fast || leader)
+            || train;
         let r = &mut race.riders[i];
         r.limit_w = limit;
         r.move_up = move_up;
@@ -361,41 +398,65 @@ fn direct_team(race: &mut Race, t: usize, sit: &Situation) {
     let progress = 1.0 - (remaining / race.course.total_m) as f32;
     let mut assign: Vec<(usize, Intent)> = Vec::new();
 
-    // Chase a breakaway that is getting too far ahead.
-    let bunch_gap = race.groups.get(sit.peloton).map(|g| g.gap_s).unwrap_or(0.0);
-    if lg == sit.peloton && sit.peloton > 0 && !team_ahead {
-        let bunch_speed = race.groups[sit.peloton]
+    // Keep a breakaway on a leash: the gap the bunch tolerates shrinks
+    // towards the line, and chasers ride whatever it takes to bring it back
+    // to that, so a break is caught late, as in a real race. Whichever group
+    // the leader is in chases, unless a teammate is further up the road.
+    let chasing = lg != usize::MAX && lg > 0 && !crew.iter().any(|&i| sit.group_of[i] < lg);
+    let bunch_gap = race.groups.get(lg).map(|g| g.gap_s).unwrap_or(0.0);
+    if chasing {
+        let bunch_speed = race.groups[lg]
             .riders
             .first()
             .map(|&r| race.riders[r].speed)
-            .unwrap_or(10.0);
-        let mut allowed = allowed_gap_s(remaining as f32 / bunch_speed.max(5.0));
-        if team.plan == Plan::Break {
-            allowed *= 1.5;
-        }
+            .unwrap_or(10.0)
+            .max(5.0);
+        // Sprinters' teams want the race together; the others mostly
+        // leave the work to them.
+        let keen = match team.plan {
+            Plan::Sprint => 1.0,
+            Plan::Climb => 1.5,
+            Plan::Break => 2.5,
+        };
+        let allowed = allowed_gap_s(remaining as f32 / bunch_speed) * keen;
         if bunch_gap > allowed {
-            let need = (1 + ((bunch_gap - allowed) / 30.0) as usize).min(3);
-            let mut workers: Vec<usize> = crew
+            let head = &race.riders[race.groups[0].riders[0]];
+            let grade = race.course.grade_pct_at(head.dist) / 100.0;
+            // Close the excess within about a minute and a half, on top of
+            // keeping pace with the shrinking allowance.
+            let closing = (CHASE_CLOSING_MPS + (bunch_gap - allowed) * bunch_speed / 90.0)
+                .min(MAX_CHASE_CLOSING_MPS);
+            let v_target = head.speed + closing;
+            let need = if bunch_gap > allowed * 2.0 { 3 } else { 2 };
+            // Riders already on the job stay on it until they tire; fresh
+            // ones near the front of the bunch take over from them. A chase
+            // is ridden around threshold, so tired legs can still help (the
+            // effort shrinks with what they have left).
+            let bunch = &race.groups[lg].riders;
+            let place = |i: usize| bunch.iter().position(|&x| x == i).unwrap_or(usize::MAX);
+            let mut workers: Vec<(bool, usize, usize)> = crew
                 .iter()
                 .copied()
-                .filter(|&i| {
-                    sit.group_of[i] == sit.peloton && race.riders[i].energy.fraction() > 0.25
+                .filter(|&i| sit.group_of[i] == lg)
+                .filter_map(|i| {
+                    let r = &race.riders[i];
+                    let pulling = matches!(r.intent, Intent::Pull { .. });
+                    let fresh = r.energy.fraction() > if pulling { 0.1 } else { 0.25 };
+                    fresh.then_some((!pulling, place(i), i))
                 })
                 .collect();
-            workers.sort_by(|&a, &b| {
-                race.riders[b]
-                    .energy
-                    .balance
-                    .total_cmp(&race.riders[a].energy.balance)
-            });
-            for &i in workers.iter().take(need) {
-                // A chase is a long, even effort, not a burst.
-                let intensity = race.rng().range(0.92, 0.97);
+            workers.sort();
+            for &(_, _, i) in workers.iter().take(need) {
+                let r = &race.riders[i];
+                let solo = r.bike.resistance_n(v_target, grade, 0.0) * v_target
+                    / (1.0 - r.bike.drivetrain_loss);
+                // Hard turns, but ones the rider can repeat for a while.
+                let repeatable = sustainable_power(r.energy.cp, r.energy.balance, CHASE_EFFORT_S);
                 assign.push((
                     i,
                     Intent::Pull {
-                        intensity,
-                        until: now + 45.0,
+                        intensity: (solo.min(repeatable) / r.profile.ftp).clamp(0.85, 1.5),
+                        until: now + DIRECTOR_INTERVAL + 1.0,
                     },
                 ));
             }
@@ -502,13 +563,14 @@ fn direct_team(race: &mut Race, t: usize, sit: &Situation) {
 
         // Sprint teams line up a lead-out train in the final kilometers.
         let near_front = race.groups.get(lg).is_some_and(|g| g.gap_s < 15.0);
-        if team.plan == Plan::Sprint && remaining < 3500.0 && near_front {
+        if team.plan == Plan::Sprint && remaining < LEADOUT_M && near_front {
+            // The last men of the train empty themselves.
             let intensity = if remaining > 2000.0 {
                 1.0
             } else if remaining > 1000.0 {
-                1.1
+                1.15
             } else {
-                1.25
+                1.5
             };
             for &i in crew.iter().filter(|&&i| sit.group_of[i] == lg) {
                 if race.riders[i].energy.fraction() > 0.1 {
@@ -678,12 +740,28 @@ fn attacks(race: &mut Race, sit: &Situation) {
         } else {
             1.0
         };
-        let p =
-            r.profile.aggression * 0.00015 * phase * terrain * counter * decisive * cat_and_mouse;
+        // Someone to attack: a rider alone has nobody to drop. And after an
+        // attack the race needs a moment before the next one flies.
+        if group.riders.len() < 2 || now - race.last_attack < ATTACK_LULL_S {
+            continue;
+        }
+        let moment = f32::min(
+            phase * terrain * counter * decisive * cat_and_mouse,
+            MAX_ATTACK_BOOST,
+        );
+        let p = r.profile.aggression * 0.00015 * moment;
         if !race.rng().chance(p) {
             continue;
         }
-        let intensity = race.rng().range(1.35, 1.6);
+        race.last_attack = now;
+        // Uphill, where speed comes from power against gravity alone, a
+        // smaller surge is enough to go clear and a climber can't afford
+        // to empty the tank.
+        let intensity = if grade > 4.0 {
+            race.rng().range(1.2, 1.4)
+        } else {
+            race.rng().range(1.35, 1.6)
+        };
         let until = now + race.rng().range(20.0, 45.0);
         race.riders[i].intent = Intent::Attack { intensity, until };
         let name = race.riders[i].profile.name.clone();
@@ -695,6 +773,26 @@ fn attacks(race: &mut Race, sit: &Situation) {
 
         // Riders of the same calibre jump on it.
         mark_attack(race, i, sit, until);
+    }
+}
+
+/// The player going clear off the front of their group is an attack like
+/// any other: rivals of the same calibre may mark it, the rest let them go.
+fn player_attack(race: &mut Race, sit: &Situation) {
+    let h = race.human;
+    let p = &race.riders[h];
+    let Some(group) = race.groups.get(sit.group_of[h]) else {
+        return;
+    };
+    if p.finished() || race.time < race.player_marked_until || group.riders.first() != Some(&h) {
+        return;
+    }
+    let grade = race.course.grade_pct_at(p.dist) / 100.0;
+    let pace = p.bike.steady_speed(group.tempo_wkg * p.profile.kg, grade);
+    if p.speed > pace + ATTACK_MARGIN_MPS && p.power > 1.2 * p.profile.ftp {
+        let until = race.time + PLAYER_ATTACK_S;
+        race.player_marked_until = until;
+        mark_attack(race, h, sit, until);
     }
 }
 
@@ -783,14 +881,15 @@ fn sprints(race: &mut Race, sit: &Situation) {
     let total = race.course.total_m;
     for i in 0..race.riders.len() {
         let r = &race.riders[i];
-        if !is_bot(r) || matches!(r.intent, Intent::Sprint { .. }) {
+        // Lead-out men keep pulling instead of sprinting.
+        if !is_bot(r) || matches!(r.intent, Intent::Sprint { .. } | Intent::Pull { .. }) {
             continue;
         }
         let front = race
             .groups
             .get(sit.group_of[i])
             .is_some_and(|g| g.gap_s < 3.0);
-        if front && race.remaining_m(i) < launch_m(r.profile.kind) && r.energy.fraction() > 0.05 {
+        if front && race.remaining_m(i) < launch_m(r) && r.energy.fraction() > 0.05 {
             race.riders[i].intent = Intent::Sprint {
                 until_m: total + 50.0,
             };
@@ -798,19 +897,25 @@ fn sprints(race: &mut Race, sit: &Situation) {
     }
 }
 
+/// Riders close a speed difference over about this many seconds.
+const CATCH_UP_S: f32 = 2.5;
+
 /// Power needed to reach `v_target` quickly from the rider's current state.
 fn required_power(r: &Rider, v_target: f32, grade: f32) -> f32 {
     let b = &r.bike;
-    // Gentle catch-up: about a third of the speed error per second.
-    let accel = ((v_target - r.speed) / 2.5).clamp(-0.8, 0.8);
+    let accel = ((v_target - r.speed) / CATCH_UP_S).clamp(-0.8, 0.8);
     let force =
         b.resistance_n(r.speed, grade, r.draft) + (b.total_kg() + b.wheel_inertia_kg) * accel;
     (force * r.speed.max(1.0) / (1.0 - b.drivetrain_loss)).max(0.0)
 }
 
+/// Follows a wheel. Riders react to the wheel speeding up or slowing down,
+/// not only to the gap it leaves, so a change of pace at the front passes
+/// down a line of riders instead of growing into a yo-yo at the back.
 fn hold_wheel(r: &Rider, wheel: &Rider, grade: f32) -> f32 {
     let gap = (wheel.dist - r.dist) as f32;
-    let v_target = wheel.speed + ((gap - FOLLOW_GAP_M) * 0.5).clamp(-2.0, 3.0);
+    let v_target =
+        wheel.speed + wheel.accel * CATCH_UP_S + ((gap - FOLLOW_GAP_M) * 0.5).clamp(-2.0, 3.0);
     required_power(r, v_target, grade)
 }
 
@@ -832,44 +937,54 @@ fn front_pace(r: &Rider, grade: f32, tempo_wkg: f32) -> f32 {
     (tempo_wkg * r.profile.kg * terrain).min(1.15 * ftp)
 }
 
-/// The player doesn't set the bunch's pace. A bot on the player's wheel rides
-/// round them when they ease below the group's tempo, and only a few strong
-/// riders jump on their wheel when they attack; the rest let them go and
-/// leave the chase to the team directors.
-fn behind_player(r: &Rider, player: &Rider, grade: f32, tempo_wkg: f32, marks_player: bool) -> f32 {
+/// Pace of a rider on the front of a group. On the decisive climb the
+/// favourites stop riding the group's tempo: whoever is on the front rides
+/// what they can hold to the top, and the climb sorts the riders by
+/// strength.
+fn own_pace(race: &Race, r: &Rider, grade: f32, tempo_wkg: f32) -> f32 {
+    let tempo = front_pace(r, grade, tempo_wkg);
+    if on_final_climb(race, r.dist) && r.limit_w < f32::MAX && !super::pack::swinging(r) {
+        tempo.max(r.limit_w * 0.97)
+    } else {
+        tempo
+    }
+}
+
+/// Nobody but the group's tempo setters decides its pace. A bot on the wheel
+/// of the player, of an attacker or of someone marking one rides round them
+/// when they ease below the group's tempo, and lets them go when they go
+/// clear: the riders who mark the move were picked when it went (see
+/// `mark_attack`), and the chase is up to the team directors. An attacker's
+/// teammates never tow the bunch after them: they block.
+fn behind_surge(r: &Rider, wheel: &Rider, grade: f32, tempo_wkg: f32, marks: bool) -> f32 {
     let pace_v = r.bike.steady_speed(front_pace(r, grade, tempo_wkg), grade);
-    if player.speed < pace_v - EASING_MARGIN_MPS {
+    if wheel.speed < pace_v - EASING_MARGIN_MPS {
         return required_power(r, pace_v, grade);
     }
-    let follows_attacks =
-        marks_player || r.profile.wkg() > tempo_wkg * 1.15 && r.id.is_multiple_of(3);
-    let wheel = hold_wheel(r, player, grade);
-    if player.speed > pace_v + ATTACK_MARGIN_MPS && !follows_attacks && r.team != player.team {
-        wheel.min(required_power(r, pace_v + ATTACK_MARGIN_MPS, grade))
+    let hold = hold_wheel(r, wheel, grade);
+    if wheel.speed > pace_v + ATTACK_MARGIN_MPS && !marks {
+        hold.min(required_power(r, pace_v + ATTACK_MARGIN_MPS, grade))
     } else {
-        wheel
+        hold
     }
 }
 
 /// Whether the leader of a group should close the gap to `target` up the
-/// road: yes for stragglers rejoining a bigger group, no for attackers and
-/// breakaways, which only team directors decide to chase.
-fn should_bridge(race: &Race, me: usize, target: usize) -> bool {
-    let t = &race.riders[target];
-    if matches!(
-        t.intent,
-        Intent::Attack { .. } | Intent::Break | Intent::Sprint { .. }
-    ) {
-        return false;
-    }
-    let size = |i: usize| {
-        race.groups
-            .iter()
-            .find(|g| g.riders.contains(&i))
-            .map(|g| g.riders.len())
-            .unwrap_or(1)
+/// road: yes when the group ahead is an accidental split (riders who just
+/// rolled clear, e.g. after an intermediate sprint), which a bunch shuts
+/// down at once; no when it is a real move (an attack, a breakaway, riders
+/// marking one), which only team directors decide to chase.
+fn should_bridge(race: &Race, target: usize) -> bool {
+    let committed = |i: usize| {
+        matches!(
+            race.riders[i].intent,
+            Intent::Attack { .. } | Intent::Break | Intent::Mark { .. } | Intent::Sprint { .. }
+        )
     };
-    size(target) >= size(me) || size(me) <= 3
+    match race.groups.iter().find(|g| g.riders.contains(&target)) {
+        Some(g) => !g.riders.iter().any(|&i| committed(i)),
+        None => !committed(target),
+    }
 }
 
 /// Effort to close a gap to `target`: as hard as a short chase allows.
@@ -877,6 +992,25 @@ fn bridge(r: &Rider, target: &Rider, grade: f32) -> f32 {
     let gap = (target.dist - r.dist) as f32;
     let v_target = target.speed + ((gap - FOLLOW_GAP_M) * 0.25).clamp(0.0, 2.5);
     required_power(r, v_target, grade).min(1.2 * r.profile.ftp)
+}
+
+/// For a sprint team's leader in the finale: the nearest teammate ahead in
+/// their lead-out train, whose wheel they ride.
+fn train_ahead(race: &Race, i: usize) -> Option<usize> {
+    let r = &race.riders[i];
+    let team = &race.teams[r.team];
+    if team.leader != i || team.plan != Plan::Sprint || race.remaining_m(i) >= LEADOUT_M {
+        return None;
+    }
+    let g = race.groups.iter().find(|g| g.riders.contains(&i))?;
+    g.riders
+        .iter()
+        .copied()
+        .filter(|&j| {
+            let o = &race.riders[j];
+            o.team == r.team && matches!(o.intent, Intent::Pull { .. }) && o.dist > r.dist
+        })
+        .min_by(|&a, &b| race.riders[a].dist.total_cmp(&race.riders[b].dist))
 }
 
 /// Pedal power for a bot this substep.
@@ -893,6 +1027,8 @@ pub fn power(race: &Race, i: usize, wheel: Option<usize>, ahead: Option<usize>) 
         .unwrap_or(3.0);
     let p = match r.intent {
         Intent::Finished => 0.4 * ftp,
+        // A sprinter rides on the last man of their team's lead-out train.
+        Intent::Sit if let Some(last) = train_ahead(race, i) => follow(last),
         Intent::Sit => match (wheel, ahead) {
             // Moving up: a little extra to come past riders in the finale.
             (Some(w), _) if race.riders[w].human => {
@@ -900,24 +1036,37 @@ pub fn power(race: &Race, i: usize, wheel: Option<usize>, ahead: Option<usize>) 
                 let progress = 1.0 - (race.remaining_m(i) / race.course.total_m) as f32;
                 let marks =
                     race.teams[r.team].leader == i && progress > 0.55 && r.energy.fraction() > 0.3;
-                behind_player(r, &race.riders[w], grade, tempo, marks)
+                behind_surge(r, &race.riders[w], grade, tempo, marks)
+            }
+            // Nobody tows the bunch after an attacker or the riders
+            // marking them.
+            (Some(w), _)
+                if matches!(
+                    race.riders[w].intent,
+                    Intent::Attack { .. } | Intent::Mark { .. }
+                ) =>
+            {
+                behind_surge(r, &race.riders[w], grade, tempo, false)
             }
             (Some(w), _) if r.move_up => follow(w) + 0.08 * ftp,
             (Some(w), _) => follow(w),
-            (None, Some(a)) if should_bridge(race, i, a) => {
-                bridge(r, &race.riders[a], grade).max(front_pace(r, grade, tempo))
+            (None, Some(a)) if should_bridge(race, a) => {
+                bridge(r, &race.riders[a], grade).max(own_pace(race, r, grade, tempo))
             }
-            (None, _) => front_pace(r, grade, tempo),
+            (None, _) => own_pace(race, r, grade, tempo),
         },
         Intent::Pull { intensity, .. } => match wheel {
-            // Sit in the team train behind a pulling teammate.
-            Some(w)
-                if race.riders[w].team == r.team
-                    && matches!(race.riders[w].intent, Intent::Pull { .. }) =>
-            {
-                follow(w)
-            }
-            _ => intensity * ftp,
+            // Turns are shared: off the front, ease up and drop back...
+            _ if super::pack::swinging(r) => 0.6 * ftp,
+            // ...wait in the line of riders doing the work...
+            Some(w) if matches!(race.riders[w].intent, Intent::Pull { .. }) => follow(w),
+            // ...take over from whoever is on the front...
+            Some(w) if race.groups.iter().any(|g| g.riders.first() == Some(&w)) => intensity * ftp,
+            // ...or move up through the bunch to join it; in the finale
+            // lead-out trains fight their way up the side of the bunch.
+            Some(w) if race.remaining_m(i) < LEADOUT_M => follow(w) + 0.3 * ftp,
+            Some(w) => follow(w) + 0.2 * ftp,
+            None => intensity * ftp,
         },
         Intent::Attack { intensity, .. } => intensity * ftp,
         Intent::Break => match wheel {

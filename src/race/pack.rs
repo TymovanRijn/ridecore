@@ -12,10 +12,12 @@ const DRAFT_REACH_M: f32 = 10.0;
 const DRAFT_ONE_WHEEL: f32 = 0.33;
 /// Lateral offset at which a wheel no longer shelters.
 const DRAFT_WIDTH_M: f32 = 1.0;
-/// Extra shelter per rider ahead deeper inside a bunch, capped.
-const PACK_BONUS_PER_RIDER: f32 = 0.015;
-const PACK_BONUS_MAX: f32 = 0.15;
-const DRAFT_MAX: f32 = 0.5;
+/// Extra shelter per rider ahead deeper inside a bunch, capped: riders in
+/// the middle of a peloton feel a fraction of the drag on its leader
+/// (Blocken et al., 2018), more than any single wheel gives.
+const PACK_BONUS_PER_RIDER: f32 = 0.025;
+const PACK_BONUS_MAX: f32 = 0.27;
+pub const DRAFT_MAX: f32 = 0.6;
 
 /// Center-to-center spacing that stands for one bike length.
 pub const MIN_GAP_M: f32 = 1.8;
@@ -30,6 +32,10 @@ const GROUP_SPLIT_S: f32 = 1.0;
 const GROUP_SPEED_FLOOR: f32 = 8.0;
 /// Seconds on the front before a rider without orders swings off...
 pub const SWING_OFF_AFTER_S: f32 = 20.0;
+/// Inside this distance to the line nobody swings off after a turn.
+const NO_TURNS_M: f64 = 1500.0;
+/// Turn length of riders pulling a chase or a lead-out.
+const PULL_TURN_S: f32 = 40.0;
 /// ...and how long they ease up for. If nobody comes through in that time
 /// (e.g. a solo rider) they simply carry on.
 const SWING_DURATION_S: f32 = 6.0;
@@ -132,6 +138,10 @@ fn nearest_wheels(riders: &[Rider], groups: &[Group]) -> Vec<Option<usize>> {
                     if o.team == me.team && dd < 12.0 {
                         score -= 3.0;
                     }
+                    // Riders latch on to their team's train.
+                    if o.team == me.team && matches!(o.intent, Intent::Pull { .. }) {
+                        score -= 10.0;
+                    }
                     Some((j, score))
                 })
                 .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -140,9 +150,18 @@ fn nearest_wheels(riders: &[Rider], groups: &[Group]) -> Vec<Option<usize>> {
         .collect()
 }
 
+/// How long a rider stays on the front before swinging off: riders sharing
+/// the work in a chase or a lead-out take short, hard turns.
+fn turn_s(r: &Rider) -> Option<f32> {
+    match r.intent {
+        Intent::Sit | Intent::Break => Some(SWING_OFF_AFTER_S),
+        Intent::Pull { .. } => Some(PULL_TURN_S),
+        _ => None,
+    }
+}
+
 pub fn swinging(r: &Rider) -> bool {
-    (SWING_OFF_AFTER_S..SWING_OFF_AFTER_S + SWING_DURATION_S).contains(&r.front_time)
-        && matches!(r.intent, Intent::Sit | Intent::Break)
+    turn_s(r).is_some_and(|turn| (turn..turn + SWING_DURATION_S).contains(&r.front_time))
 }
 
 /// Personal line preference so the bunch rides several abreast: riders sit
@@ -209,6 +228,7 @@ pub fn steer(race: &mut Race, wheels: &[Option<usize>], h: f32) {
         })
         .collect();
     for (i, target) in targets.into_iter().enumerate() {
+        let finale = race.remaining_m(i) < NO_TURNS_M;
         let r = &mut race.riders[i];
         let speed = if r.human {
             2.0 * STEER_SPEED
@@ -218,15 +238,22 @@ pub fn steer(race: &mut Race, wheels: &[Option<usize>], h: f32) {
         let step = (target - r.lateral).clamp(-speed * h, speed * h);
         r.lateral = (r.lateral + step).clamp(-ROAD_HALF_WIDTH, ROAD_HALF_WIDTH);
         if wheels[i].is_none() && !r.finished() {
-            // A turn that hurts is cut short.
-            let tired =
-                r.front_time > 5.0 && r.front_time < SWING_OFF_AFTER_S && r.energy.fraction() < 0.5;
+            // A turn that hurts is cut short. In the finale nobody takes
+            // turns: riders on the front stay there until they're spent.
+            let turn = turn_s(r).unwrap_or(SWING_OFF_AFTER_S);
+            let tired = if finale {
+                r.energy.fraction() < 0.1
+            } else {
+                r.front_time > 5.0 && r.front_time < turn && r.energy.fraction() < 0.5
+            };
             r.front_time = if tired {
-                SWING_OFF_AFTER_S
+                turn
+            } else if finale {
+                0.0
             } else {
                 r.front_time + h
             };
-            if r.front_time > SWING_OFF_AFTER_S + SWING_DURATION_S {
+            if r.front_time > turn + SWING_DURATION_S {
                 r.front_time = 0.0;
             }
         } else {
@@ -238,7 +265,8 @@ pub fn steer(race: &mut Race, wheels: &[Option<usize>], h: f32) {
 /// Bots cannot ride through each other: a rider right behind another in the
 /// same line can't go faster than it and is eased sideways towards open
 /// road, so it can come past. The player passes through, as in Zwift, so
-/// their power is never wasted.
+/// their power is never wasted, and so do riders moving up in the finale,
+/// which stands for coming up the side of a bunch filling the road.
 pub fn separate(riders: &mut [Rider], h: f32) {
     let mut order: Vec<usize> = (0..riders.len()).collect();
     order.sort_by(|&a, &b| riders[b].dist.total_cmp(&riders[a].dist));
@@ -249,7 +277,11 @@ pub fn separate(riders: &mut [Rider], h: f32) {
             if dd > MIN_GAP_M {
                 break;
             }
-            if riders[back].human || riders[front].human || riders[back].finished() {
+            if riders[back].human
+                || riders[front].human
+                || riders[back].finished()
+                || riders[back].move_up
+            {
                 continue;
             }
             let dy = riders[back].lateral - riders[front].lateral;
@@ -348,6 +380,7 @@ mod tests {
             dist,
             lateral,
             speed: 11.0,
+            accel: 0.0,
             power: 250.0,
             cadence: 90.0,
             draft: 0.0,

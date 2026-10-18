@@ -177,8 +177,9 @@ fn protect_order_keeps_teammates_with_a_struggling_player() {
 
 #[test]
 fn chases_must_end_well_before_the_line() {
-    // Ten minutes from the line a bunch tolerates about 40 s; at the end, almost nothing.
-    assert!((ai::allowed_gap_s(600.0) - 37.5).abs() < 0.1);
+    // Twenty minutes from the line a bunch tolerates about a minute; at the
+    // end, almost nothing.
+    assert!((ai::allowed_gap_s(1200.0) - 56.25).abs() < 0.1);
     assert_eq!(ai::allowed_gap_s(200.0), 5.0);
     assert!(ai::allowed_gap_s(3600.0) > ai::allowed_gap_s(1800.0));
 }
@@ -250,19 +251,23 @@ fn player_on_the_front(seed: u64) -> (RaceConfig, Race) {
 }
 
 /// Leading the bunch at an easy pace must not slow the race down: riders
-/// come past and carry on at their own tempo.
+/// come past and carry on at their own tempo, well above what the player
+/// would ride alone.
 #[test]
 fn an_easy_player_does_not_hold_up_the_bunch() {
     let (cfg, mut race) = player_on_the_front(21);
-    let start = race.time;
+    let front = |race: &Race| race.riders.iter().map(|r| r.dist).fold(0.0, f64::max);
+    let (start, from) = (race.time, front(&race));
     while race.time < start + 120.0 {
         race.step(0.25, 0.6 * cfg.player.ftp, 88.0);
     }
-    let me = race.player().dist;
-    let ahead = race.riders.iter().filter(|r| r.dist > me + 20.0).count();
+    let bunch = (front(&race) - from) as f32 / 120.0;
+    let alone = race.player().bike.steady_speed(0.6 * cfg.player.ftp, 0.0);
     assert!(
-        ahead > race.riders.len() / 2,
-        "only {ahead} riders went past an easy-riding player"
+        bunch > alone + 0.8,
+        "the bunch rode {:.1} km/h behind a player good for {:.1} km/h",
+        bunch * 3.6,
+        alone * 3.6
     );
 }
 
@@ -367,8 +372,9 @@ fn the_player_gets_into_the_wheel_without_steering() {
             .filter(|r| !r.human && r.dist > me.dist)
             .map(|r| (r.dist - me.dist) as f32)
             .fold(f32::MAX, f32::min);
-        // Nobody ahead: ease up and let the bunch come past.
-        power = if gap == f32::MAX {
+        // Nobody just ahead (at most a breakaway up the road): ease up and
+        // let the bunch come past.
+        power = if gap > 20.0 {
             150.0
         } else {
             (250.0 + 40.0 * (gap - 2.5)).clamp(120.0, 500.0)
