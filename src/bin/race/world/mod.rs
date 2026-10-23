@@ -38,8 +38,8 @@ use zones::{Zone, ZoneMap};
 #[derive(Component)]
 pub struct WorldPart;
 
-const ROAD_HALF: f32 = 4.6;
-const ROAD_LIFT: f32 = 0.12;
+pub(crate) const ROAD_HALF: f32 = 4.6;
+pub(crate) const ROAD_LIFT: f32 = 0.12;
 const SAMPLE_M: f64 = 4.0;
 const CELL_M: f32 = 16.0;
 /// The ground under and beside the road sits this far below its surface.
@@ -472,7 +472,7 @@ fn lap_samples(course: &Course) -> Vec<f64> {
     (0..=n).map(|i| (i as f64 * SAMPLE_M).min(lap)).collect()
 }
 
-fn pose_v(course: &Course, d: f64, lateral: f32) -> (Vec3, Vec3) {
+pub(crate) fn pose_v(course: &Course, d: f64, lateral: f32) -> (Vec3, Vec3) {
     let p = course.path.pose(&course.route, d, lateral);
     (Vec3::from_array(p.pos), Vec3::new(p.dir[0], 0.0, p.dir[1]))
 }

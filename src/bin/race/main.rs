@@ -14,6 +14,7 @@ mod riders;
 mod setup;
 mod share;
 mod sound;
+mod sprint;
 mod theme;
 mod training;
 mod watch;
@@ -170,6 +171,7 @@ fn main() {
             theme::ThemePlugin,
             captions::CaptionsPlugin,
             training::TrainingPlugin,
+            sprint::SprintPlugin,
             watch::WatchPlugin,
         ))
         .add_systems(
@@ -249,7 +251,8 @@ pub fn advance_race(
 }
 
 /// A race left before the finish is still saved (FIT and card), so every
-/// ride ends up in ~/Documents/RideCore. Workouts save themselves.
+/// ride ends up in ~/Documents/RideCore. Workouts and sprints save
+/// themselves.
 /// While you ride, the Mac must not start the screen saver or dim the
 /// display: macOS then stops drawing the window and the ride freezes.
 /// `caffeinate -d` holds that off and quits by itself when RideCore does.
@@ -274,11 +277,15 @@ fn allow_sleep(mut keep: ResMut<KeepAwake>) {
     }
 }
 
-fn save_unfinished(mut res: Option<ResMut<RaceRes>>, session: Option<Res<training::Session>>) {
+fn save_unfinished(
+    mut res: Option<ResMut<RaceRes>>,
+    session: Option<Res<training::Session>>,
+    sprints: Option<Res<sprint::SprintSession>>,
+) {
     let Some(res) = res.as_deref_mut() else {
         return;
     };
-    if session.is_none() && res.can_save_unfinished() {
+    if session.is_none() && sprints.is_none() && res.can_save_unfinished() {
         res.saved = Some(share::save_ride(res));
     }
 }
@@ -365,9 +372,14 @@ fn screenshots(
     let every = std::env::var("RIDECORE_SHOT_EVERY")
         .ok()
         .and_then(|v| v.parse::<f32>().ok());
+    // `RIDECORE_SHOT_DELAY=<s>` takes the series that much later.
+    let delay = std::env::var("RIDECORE_SHOT_DELAY")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0);
     let plan = |k: usize| match every {
         Some(e) if res.watch.is_some() => (k < PLAN.len()).then(|| ((k + 1) as f32 * e, None)),
-        _ => PLAN.get(k).map(|&(at, view)| (at, Some(view))),
+        _ => PLAN.get(k).map(|&(at, view)| (at + delay, Some(view))),
     };
     if let Some((at, view)) = plan(*taken) {
         if let Some(view) = view

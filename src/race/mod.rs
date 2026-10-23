@@ -174,6 +174,9 @@ pub struct Race {
     /// Nobody rides: every rider is a bot and `human` only says who the
     /// camera follows (see [`Race::spectate`]).
     pub spectating: bool,
+    /// Bots under outside control (sprint training): per rider, the power
+    /// to ride, and no race tactics. The player's entry is ignored.
+    pub script: Option<Vec<f32>>,
     rng: Rng,
     ai_timer: f32,
     pub(crate) director_timer: f32,
@@ -297,6 +300,7 @@ impl Race {
             finish: Vec::new(),
             human,
             spectating: false,
+            script: None,
             rng,
             ai_timer: 0.0,
             director_timer: 0.0,
@@ -422,7 +426,9 @@ impl Race {
         if self.ai_timer >= AI_INTERVAL {
             self.ai_timer = 0.0;
             self.groups = pack::find_groups(&self.riders);
-            ai::decide(self);
+            if self.script.is_none() {
+                ai::decide(self);
+            }
         }
 
         pack::update_draft(&mut self.riders);
@@ -431,6 +437,8 @@ impl Race {
         for i in 0..self.riders.len() {
             let power = if self.riders[i].human {
                 player_power.max(0.0)
+            } else if let Some(script) = &self.script {
+                script.get(i).copied().unwrap_or(0.0).max(0.0)
             } else {
                 ai::power(self, i, neighbors[i], ahead[i])
             };
@@ -532,6 +540,14 @@ impl Race {
         }
         pts.sort_by_key(|&(_, p)| std::cmp::Reverse(p));
         pts
+    }
+
+    /// Moves every rider `meters` back down the road, keeping the gaps
+    /// between them: a session longer than the road starts over.
+    pub fn rewind(&mut self, meters: f64) {
+        for r in &mut self.riders {
+            r.dist -= meters;
+        }
     }
 
     /// Meters left to the finish for `rider`.

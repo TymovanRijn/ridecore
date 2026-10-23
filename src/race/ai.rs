@@ -924,7 +924,7 @@ fn sprints(race: &mut Race, sit: &Situation) {
 const CATCH_UP_S: f32 = 2.5;
 
 /// Power needed to reach `v_target` quickly from the rider's current state.
-fn required_power(r: &Rider, v_target: f32, grade: f32) -> f32 {
+pub fn required_power(r: &Rider, v_target: f32, grade: f32) -> f32 {
     let b = &r.bike;
     let accel = ((v_target - r.speed) / CATCH_UP_S).clamp(-0.8, 0.8);
     let force =

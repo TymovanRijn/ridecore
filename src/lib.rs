@@ -16,6 +16,7 @@ pub mod race;
 pub mod rng;
 pub mod route;
 pub mod sensors;
+pub mod sprint;
 pub mod strava;
 pub mod trainer;
 pub mod training;

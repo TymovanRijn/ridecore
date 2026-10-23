@@ -32,6 +32,7 @@ const KINDS: [RiderKind; 4] = [
 pub enum PlayMode {
     Race,
     Training,
+    Sprint,
 }
 
 #[derive(Resource)]
@@ -75,6 +76,8 @@ pub struct SetupForm {
     notice: Option<String>,
     /// Saved between sessions: profile and training log.
     pub profile: Profile,
+    /// Catalog indices of the roads flat enough for sprints.
+    sprint_roads: Vec<usize>,
 }
 
 struct RouteInfo {
@@ -143,10 +146,14 @@ impl Default for SetupForm {
             builder: None,
             confirm_delete: None,
             notice: None,
+            sprint_roads: Vec::new(),
             profile,
         };
         form.infos = form.routes.iter().map(RouteInfo::of).collect();
-        // `RIDECORE_MODE=training` opens on the training tab (screenshots).
+        // `RIDECORE_MODE=training|sprint` opens on that tab (screenshots).
+        if std::env::var("RIDECORE_MODE").is_ok_and(|m| m == "sprint") {
+            form.mode = PlayMode::Sprint;
+        }
         if std::env::var("RIDECORE_MODE").is_ok_and(|m| m == "training") {
             form.mode = PlayMode::Training;
             form.workout = 1;
@@ -267,6 +274,60 @@ impl SetupForm {
         self.save_profile();
     }
 
+    /// A sprint session: you and the rivals, one rider a team, on the
+    /// road picked for it, with enough laps for the whole session.
+    fn sprint_config(&self) -> RaceConfig {
+        let s = &self.profile.sprint;
+        let mut cfg = self.config();
+        let route = self
+            .routes
+            .iter()
+            .find(|r| r.id == s.route)
+            .or_else(|| self.routes.iter().find(|r| r.id == "flat-loop"))
+            .unwrap_or(&self.routes[self.route])
+            .clone();
+        let needed = s.total_s() as f64 * 15.0;
+        cfg.laps = if route.looped {
+            (needed / route.length_m()).ceil().max(1.0) as u32 + 1
+        } else {
+            1
+        };
+        cfg.route = route;
+        let mine = self.teams[self.player_team].clone();
+        let rivals = rival_teams(
+            ridecore::race::field::TEAM_PRESETS.len(),
+            self.ftp / self.kg,
+            1.0,
+        )
+        .into_iter()
+        .filter(|t| t.name != mine.name)
+        .take(s.rivals as usize)
+        .collect::<Vec<_>>();
+        cfg.teams = std::iter::once(mine).chain(rivals).collect();
+        cfg.riders_per_team = 1;
+        cfg.player_team = 0;
+        cfg.countdown_s = 3.0;
+        cfg
+    }
+
+    /// Starts the sprint session set up on the sprint tab.
+    pub fn start_sprints(&mut self, commands: &mut Commands) {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(7);
+        let mut race = Race::new(&self.sprint_config());
+        let mut drill = ridecore::sprint::Drill::new(self.profile.sprint.clone(), self.ftp, seed);
+        drill.take_over(&mut race);
+        let before = ridecore::sprint::records(&self.profile.sprint_log);
+        commands.remove_resource::<crate::training::Session>();
+        commands.insert_resource(crate::sprint::SprintSession::new(drill, before));
+        let mut res = RaceRes::new(race);
+        // No ghost of an old race riding along.
+        res.best = None;
+        commands.insert_resource(res);
+    }
+
     /// A workout: you alone on the chosen road, with enough laps for it.
     fn training_config(&self) -> RaceConfig {
         let mut cfg = self.config();
@@ -356,6 +417,27 @@ fn autostart(
         && watts > 1.0
     {
         settings.keyboard_watts = watts;
+    }
+    // `RIDECORE_SPRINTS=1` rides a sprint session instead, with
+    // `RIDECORE_SPRINT_WARMUP=<s>` for a shorter warm-up,
+    // `RIDECORE_SPRINT_COUNT=<n>` sprints and `RIDECORE_SPRINT_REST=<s>`
+    // (no cool-down) for a short session.
+    if std::env::var_os("RIDECORE_SPRINTS").is_some() {
+        let env = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
+        let s = &mut form.profile.sprint;
+        if let Some(w) = env("RIDECORE_SPRINT_WARMUP") {
+            s.warmup_s = w;
+        }
+        if let Some(c) = env("RIDECORE_SPRINT_COUNT") {
+            s.count = c as u32;
+        }
+        if let Some(r) = env("RIDECORE_SPRINT_REST") {
+            s.rest_s = r;
+            s.cooldown_s = 0.0;
+        }
+        form.start_sprints(&mut commands);
+        next.set(Screen::Racing);
+        return;
     }
     // `RIDECORE_TRAINING=<workout id>` rides a workout instead, and
     // `RIDECORE_SKIP_S=<s>` starts it that far in.
@@ -473,6 +555,24 @@ fn setup_ui(
             }
             devices_card(ui, &mut settings, &trainer, &mut strava);
         });
+        if form.mode == PlayMode::Sprint {
+            if form.sprint_roads.is_empty() {
+                form.sprint_roads = crate::sprint::flat_roads(&form.routes);
+            }
+            let roads = form.sprint_roads.clone();
+            column(ui, "mid", col, height, |ui| {
+                crate::sprint::settings_card(ui, &mut form, &roads)
+            });
+            column(ui, "right-sprint", col, height, |ui| {
+                let can_start = settings.keyboard || trainer.name.is_some();
+                if crate::sprint::start_card(ui, &mut form, can_start, t) {
+                    form.save_profile();
+                    form.start_sprints(&mut commands);
+                    next.set(Screen::Racing);
+                }
+            });
+            return;
+        }
         if form.mode == PlayMode::Training {
             column(ui, "mid", col, height, |ui| library_card(ui, &mut form));
             // Like the race, the start button stays in view under the details.
@@ -1257,6 +1357,10 @@ fn start_card(ui: &mut egui::Ui, form: &SetupForm, can_start: bool, t: f32) -> O
 }
 
 /// The big pulsing start button.
+pub fn start_button(ui: &mut egui::Ui, text: &str, can_start: bool, t: f32) -> bool {
+    start_button_inner(ui, text, can_start, t)
+}
+
 fn start_button_inner(ui: &mut egui::Ui, text: &str, can_start: bool, t: f32) -> bool {
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), 70.0),
@@ -1324,6 +1428,11 @@ fn mode_tabs(ui: &mut egui::Ui, form: &mut SetupForm) {
                     "Intervallen in ERG of als spel",
                     "Intervals in ERG or as a game",
                 ),
+            ),
+            (
+                PlayMode::Sprint,
+                "SPRINTS",
+                t("Sprinten tegen rivalen", "Sprint against rivals"),
             ),
         ] {
             let selected = form.mode == mode;

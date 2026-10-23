@@ -345,11 +345,20 @@ fn update_input(
     trainer: Res<Trainer>,
     settings: Res<InputSettings>,
     session: Option<Res<crate::training::Session>>,
+    sprints: Option<Res<crate::sprint::SprintSession>>,
+    res: Option<Res<RaceRes>>,
     time: Res<Time>,
     mut input: ResMut<PlayerInput>,
 ) {
-    // In test mode a workout rides itself, the way ERG would hold you.
+    // In test mode a workout rides itself, the way ERG would hold you,
+    // and so do sprints.
     if settings.keyboard
+        && let (Some(s), Some(res)) = (sprints.as_ref(), res.as_ref())
+    {
+        input.power = s.test_power(res, settings.keyboard_watts);
+        input.cadence = if input.power > 600.0 { 112.0 } else { 90.0 };
+        input.heart_rate = None;
+    } else if settings.keyboard
         && let Some(w) = session.as_ref().and_then(|s| s.target_w())
     {
         let t = time.elapsed_secs();

@@ -145,6 +145,7 @@ pub fn save_training(
     title: &str,
     badges: Vec<String>,
     accent: [u8; 3],
+    how: &str,
 ) -> Result<SavedRide, String> {
     let samples = &res.samples;
     let me = res.race.player();
@@ -182,13 +183,12 @@ pub fn save_training(
     let card_path = dir.join(format!("training-{stamp}.png"));
     let card = std::fs::write(&card_path, png).ok().map(|_| card_path);
     let description = tf!(
-        "🏋️ {title}\n⚡ {:.0} W gem · {:.0} W NP · {:.2} W/kg\n🚴 {}\nGereden in RideCore, in ERG-modus op {}.",
-        "🏋️ {title}\n⚡ {:.0} W avg · {:.0} W NP · {:.2} W/kg\n🚴 {}\nRidden in RideCore, in ERG mode on {}.",
+        "🏋️ {title}\n⚡ {:.0} W gem · {:.0} W NP · {:.2} W/kg\n🚴 {}\nGereden in RideCore, {how}.",
+        "🏋️ {title}\n⚡ {:.0} W avg · {:.0} W NP · {:.2} W/kg\n🚴 {}\nRidden in RideCore, {how}.",
         stats.avg_power,
         stats.norm_power,
         stats.avg_power / me.profile.kg,
         badges.join(" · "),
-        route.name,
     );
     Ok(SavedRide {
         fit: fit_path,

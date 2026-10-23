@@ -58,8 +58,11 @@ impl Plugin for TrainingPlugin {
 }
 
 /// Run condition for the race-only screens.
-pub fn racing(session: Option<Res<Session>>) -> bool {
-    session.is_none()
+pub fn racing(
+    session: Option<Res<Session>>,
+    sprints: Option<Res<crate::sprint::SprintSession>>,
+) -> bool {
+    session.is_none() && sprints.is_none()
 }
 
 /// The workout being ridden.
@@ -621,11 +624,25 @@ fn finish(
         badges.insert(0, tf!("Nieuwe FTP {f:.0} W", "New FTP {f:.0} W"));
     }
     if res.samples.len() > 10 {
+        let how = if s.game.is_some() {
+            tf!(
+                "als spel op {}",
+                "as a game on {}",
+                res.race.course.route.name
+            )
+        } else {
+            tf!(
+                "in ERG-modus op {}",
+                "in ERG mode on {}",
+                res.race.course.route.name
+            )
+        };
         res.saved = Some(crate::share::save_training(
             res,
             &s.plan.name,
             badges,
             s.plan.focus.rgb(),
+            &how,
         ));
     }
 }

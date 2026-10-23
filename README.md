@@ -19,6 +19,7 @@ A free, open-source indoor cycling app written in Rust with [Bevy](https://bevye
   - **Fishing**: your power is the tension on the line. Too slack and the fish swims away.
 
   Games run without ERG. The trainer rides a flat road and you hit the target with your gears, so it's you holding the watts, not the trainer.
+- **Sprint training.** Short all-out sprints to a line against a few rivals, with full recovery in between, to raise your peak and 5–30 s power. You set the number of sprints, their duration as a mean ± standard deviation (so no two are the same), the rest, the warm-up and cool-down, and the rivals' watts (also mean ± sd). The rivals ride your bike and your weight, so watts compare directly. They jump around the start mark, sometimes early, and you have to react. The trainer stays in simulation mode, so a sprint is whatever you put out. Every sprint is scored (average, peak, time to the line, top speed, place), and your best peak, 5, 10, 15 and 30 s powers are kept as records.
 - **Virtual shifting** with a Zwift Click (or the +/− keys). On trainers that support Zwift's own trainer protocol, like the Wahoo KICKR CORE with the Zwift Cog, RideCore sends the grade and gear ratio to the trainer and lets it set the resistance itself, the way Zwift does. Shifts land instantly. Other trainers use a standard FTMS fallback.
 - **FIT files and Strava upload.** Every ride and workout is saved as a `.fit` file in `~/Documents/RideCore`. You can also upload it to Strava using your own Strava API app. Its credentials are stored only in the macOS Keychain.
 
@@ -65,7 +66,7 @@ On macOS, `tools/make_app.sh` puts a `RideCore.app` on your Desktop. Opening it 
 src/            core library: Bluetooth (FTMS, Zwift Click and trainer protocol),
                 trainer control, physics, routes, workouts, FIT, Strava
 src/race/       the race simulation: physics in the bunch, drafting, AI tactics
-src/bin/race/   the game: 3D world, rider models, HUD, training mode and games
+src/bin/race/   the game: 3D world, rider models, HUD, training mode, games and sprints
 examples/       the race lab and race story tools
 assets/         routes, map data and fonts (embedded in the binary at build time)
 tools/          scripts that build the routes, the map data and the macOS app

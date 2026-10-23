@@ -17,6 +17,9 @@ pub struct Profile {
     /// "nl" or "en"; empty follows the system language.
     pub lang: String,
     pub sessions: Vec<Session>,
+    /// The sprint session as last set up, and every one ridden.
+    pub sprint: crate::sprint::SprintSettings,
+    pub sprint_log: Vec<crate::sprint::SprintLog>,
 }
 
 impl Default for Profile {
@@ -29,6 +32,8 @@ impl Default for Profile {
             role: 2,
             lang: String::new(),
             sessions: Vec::new(),
+            sprint: Default::default(),
+            sprint_log: Vec::new(),
         }
     }
 }
