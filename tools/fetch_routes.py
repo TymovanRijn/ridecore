@@ -85,8 +85,14 @@ ROUTES = [
     # Hino, Hachiōji and its ginkgo avenue to Takao, over the Ōtarumi Pass to
     # Lake Sagami, and up the Jinba Kaidō from Fujino to the Wada Pass.
     # Waypoints on Route 20 itself keep the router off the bypasses.
-    ("tokyo-wada", "Tokio – Wada-tōge", "Tokio/Kanagawa, Japan", [(35.6712, 139.4930), (35.6828, 139.4123), (35.66078, 139.32331), (35.64256, 139.2802), (35.63831, 139.27124), (35.63286, 139.27105), (35.6207, 139.2278), (35.6577, 139.1685)], 50.0, 950, 16),
+    ("tokyo-wada", "Tokio – Wada-tōge", "Tokio/Kanagawa, Japan", [(35.6712, 139.4930), (35.6828, 139.4123), (35.66078, 139.32331), (35.64256, 139.2802), (35.63831, 139.27124), (35.63286, 139.27105), (35.6207, 139.2278), (35.61546, 139.22037), (35.6230, 139.2040), (35.6577, 139.1685)], 50.0, 950, 16),
 ]
+
+# Legs (from waypoint k to k+1) routed with another profile. Over the
+# Ōtarumi into Sagamiko, Route 20 is one-way westbound only on paper for a
+# narrow stretch and the car router sends you down steep side streets; the
+# road is closed for the race, so it follows Route 20 (as on foot).
+LEG_PROFILE = {"tokyo-wada": {7: "foot"}}
 
 # Japanese routes take their heights from GSI's own elevation model (5 m
 # laser survey, 10 m elsewhere) instead of EU-DEM.
@@ -139,7 +145,10 @@ def geocode(wp):
 def route(points, profile):
     coords = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in points)
     url = f"https://routing.openstreetmap.de/routed-{profile}/route/v1/driving/{coords}?overview=full&geometries=geojson"
-    res = http_json(url, cache_key=f"route_{profile}_" + safe(coords))
+    # The key is cut at 80 characters: longer waypoint lists get a hash, or
+    # two lists starting alike would share an answer.
+    key = safe(coords) if len(safe(coords)) < 80 else hashlib.sha1(coords.encode()).hexdigest()
+    res = http_json(url, cache_key=f"route_{profile}_" + key)
     if res.get("code") != "Ok":
         raise RuntimeError(f"routing failed: {res.get('code')}")
     return [(lat, lon) for lon, lat in res["routes"][0]["geometry"]["coordinates"]]
@@ -488,7 +497,20 @@ def limit_grades(ele, dist, max_pct):
 
 def build(rid, name, region, waypoints, ref_km, ref_gain, ref_max):
     pts = [geocode(w) for w in waypoints]
-    line = resample(route(pts, "bike" if rid in BIKE_PROFILE else "car"), STEP_M)
+    profile = "bike" if rid in BIKE_PROFILE else "car"
+    legs = LEG_PROFILE.get(rid, {})
+    track = []
+    k = 0
+    while k < len(pts) - 1:
+        # Runs of legs on the same profile go in one request.
+        j = k + 1
+        leg_profile = legs.get(k, profile)
+        while j < len(pts) - 1 and legs.get(j, profile) == leg_profile:
+            j += 1
+        part = route(pts[k : j + 1], leg_profile)
+        track += part[1:] if track else part
+        k = j
+    line = resample(track, STEP_M)
     # ~180 m smoothing: DEM cells on hairpins and in cuttings mix in the
     # slope beside the road; the road itself changes grade gradually.
     if rid in JAPAN:

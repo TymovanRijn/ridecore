@@ -167,6 +167,9 @@ pub enum ControlRequest {
         rider_kg: f32,
         bike_kg: f32,
     },
+    /// Not sent to the trainer: drop the connection and connect again
+    /// (when the trainer stopped taking its commands).
+    Reconnect,
 }
 
 impl ControlRequest {
@@ -178,6 +181,7 @@ impl ControlRequest {
             Self::SetSimulation { .. } => 0x11,
             // Not an FTMS opcode; only used to tell requests apart.
             Self::SetGear { .. } => 0xF0,
+            Self::Reconnect => 0xF1,
         }
     }
 

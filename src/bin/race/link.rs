@@ -11,7 +11,8 @@ use ridecore::ble::{self, TrainerEvent};
 use ridecore::ftms::ControlRequest;
 use ridecore::sensors::LiveData;
 use ridecore::trainer::{
-    ControlTuning, Mode, TRAINER_CRR, TRAINER_CW, TrainerController, VirtualGears, draft_relief_pct,
+    ControlTuning, Mode, TRAINER_CRR, TRAINER_CW, TrainerController, VirtualGears,
+    draft_relief_pct, shifts_ignored,
 };
 
 use crate::{RaceRes, Screen};
@@ -24,6 +25,46 @@ const CONTROL_INTERVAL: Duration = Duration::from_millis(500);
 /// shifts itself gets the gear on the very next frame, as in Zwift).
 const SHIFT_INTERVAL: Duration = Duration::from_millis(120);
 const NATIVE_SHIFT_INTERVAL: Duration = Duration::ZERO;
+
+/// Watches runs of shifts, to notice when the trainer stops taking its
+/// commands (the gears change on screen but the legs feel nothing).
+#[derive(Default)]
+struct ShiftCheck {
+    /// Power and cadence over the last few seconds.
+    recent: std::collections::VecDeque<(Instant, f32, f32)>,
+    /// The run of shifts going on: the ratio, power and cadence before it.
+    burst: Option<(f32, f32, f32)>,
+}
+
+impl ShiftCheck {
+    fn record(&mut self, power: f32, cadence: f32) {
+        let now = Instant::now();
+        self.recent.push_back((now, power, cadence));
+        while self
+            .recent
+            .front()
+            .is_some_and(|&(t, ..)| now - t > Duration::from_secs(12))
+        {
+            self.recent.pop_front();
+        }
+    }
+
+    /// Mean power and cadence between two moments.
+    fn mean(&self, from: Instant, to: Instant) -> Option<(f32, f32)> {
+        let s: Vec<_> = self
+            .recent
+            .iter()
+            .filter(|&&(t, ..)| t >= from && t <= to)
+            .collect();
+        (s.len() >= 2).then(|| {
+            let n = s.len() as f32;
+            (
+                s.iter().map(|x| x.1).sum::<f32>() / n,
+                s.iter().map(|x| x.2).sum::<f32>() / n,
+            )
+        })
+    }
+}
 
 #[derive(Resource)]
 pub struct Trainer {
@@ -53,6 +94,7 @@ pub struct Trainer {
     /// finding out what went wrong after a ride.
     log: Option<std::io::BufWriter<std::fs::File>>,
     log_start: Instant,
+    check: ShiftCheck,
 }
 
 impl Trainer {
@@ -67,6 +109,12 @@ impl Trainer {
             return;
         };
         let before = g.index;
+        if self.check.burst.is_none() {
+            let now = Instant::now();
+            if let Some((p, c)) = self.check.mean(now - Duration::from_secs(3), now) {
+                self.check.burst = Some((g.ratio(), p, c));
+            }
+        }
         if dir > 0 {
             g.shift_up();
         } else {
@@ -159,6 +207,7 @@ impl Plugin for LinkPlugin {
             native_shifting: false,
             log: open_log(),
             log_start: Instant::now(),
+            check: ShiftCheck::default(),
         })
         .init_resource::<PlayerInput>()
         .init_resource::<InputSettings>()
@@ -224,6 +273,10 @@ fn poll_trainer(
             TrainerEvent::Connected(name) => {
                 t.status = tf!("Verbonden met {name}", "Connected to {name}");
                 t.name = Some(name.clone());
+                // A fresh connection knows nothing yet: gear and grade
+                // go out again.
+                t.controller.resend();
+                t.check = ShiftCheck::default();
             }
             TrainerEvent::NativeShifting(on) => {
                 t.native_shifting = *on;
@@ -454,6 +507,7 @@ fn control_trainer(
         .map(|g| (g.index as i32 + 1, g.ratio(), g.physical_ratio))
         .unwrap_or((0, 0.0, 0.0));
     let road_now = race.course.smooth_grade_pct(me.dist);
+    check_shifts(t, input.power, cadence, mode, race.started() && !res.paused);
     let age = t.live.power_age_s().unwrap_or(-1.0);
     let pps = t.live.packets_per_s();
     t.log_line(format_args!(
@@ -465,6 +519,43 @@ fn control_trainer(
         me.draft,
         me.speed * 3.6,
     ));
+}
+
+/// A few seconds after a run of shifts, checks the legs felt it; if the
+/// trainer ignored it (it stopped taking commands, as a KICKR CORE did after
+/// a too steep descent), reconnects to it.
+fn check_shifts(t: &mut Trainer, power: f32, cadence: f32, mode: Mode, riding: bool) {
+    t.check.record(power, cadence);
+    let Some(last) = t.last_shift else { return };
+    if t.check.burst.is_none() || last.elapsed() < Duration::from_millis(4500) {
+        return;
+    }
+    let Some((ratio_before, p0, c0)) = t.check.burst.take() else {
+        return;
+    };
+    let after = t.check.mean(
+        last + Duration::from_millis(1500),
+        last + Duration::from_millis(4500),
+    );
+    let Some(ratio_after) = t.controller.gears.as_ref().map(VirtualGears::ratio) else {
+        return;
+    };
+    let Some((p1, c1)) = after else { return };
+    if t.native_shifting
+        && riding
+        && matches!(mode, Mode::Sim { .. })
+        && shifts_ignored(ratio_before, ratio_after, (p0, p1), (c0, c1))
+    {
+        t.log_line(format_args!(
+            "ignored shifts {ratio_before:.2}->{ratio_after:.2} power {p0:.0}->{p1:.0}: reconnecting"
+        ));
+        t.status = ridecore::i18n::t(
+            "Trainer negeerde het schakelen: opnieuw verbinden…",
+            "Trainer ignored the shifts: reconnecting…",
+        )
+        .into();
+        t.send(ControlRequest::Reconnect);
+    }
 }
 
 fn flat_road(trainer: Res<Trainer>) {

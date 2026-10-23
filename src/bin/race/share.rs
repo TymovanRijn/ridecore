@@ -121,11 +121,20 @@ pub fn save_ride(res: &RaceRes) -> Result<SavedRide, String> {
     Ok(SavedRide {
         fit: fit_path,
         card,
-        name: tf!(
-            "RideCore: {} – {place_text} van {field}",
-            "RideCore: {} – {place_text} of {field}",
-            route.name
-        ),
+        name: if me.finished() {
+            tf!(
+                "RideCore: {} – {place_text} van {field}",
+                "RideCore: {} – {place_text} of {field}",
+                route.name
+            )
+        } else {
+            tf!(
+                "RideCore: {} – gestopt na {:.1} km",
+                "RideCore: {} – stopped after {:.1} km",
+                route.name,
+                stats.distance_m / 1000.0
+            )
+        },
         description,
     })
 }

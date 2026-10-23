@@ -138,6 +138,37 @@ pub struct TrainerController {
 /// Repeat an unchanged target this often (seconds).
 const REFRESH_S: f32 = 2.0;
 
+/// The grades a KICKR can simulate. A steeper descent (a −22% grade went
+/// out at the bottom of the Ōtarumi) left the KICKR CORE ignoring every
+/// command after it, gears and grade alike, until it was reconnected.
+pub const MIN_GRADE_PCT: f32 = -10.0;
+pub const MAX_GRADE_PCT: f32 = 20.0;
+
+/// Whether a run of shifts at a steady cadence left the power where it
+/// was: the trainer isn't taking its commands any more. Shifting a quarter
+/// or more harder (or easier) normally moves the power by far more than
+/// 10% in that direction within a few seconds.
+pub fn shifts_ignored(
+    ratio_before: f32,
+    ratio_after: f32,
+    (power_before, power_after): (f32, f32),
+    (cadence_before, cadence_after): (f32, f32),
+) -> bool {
+    let big = (ratio_after / ratio_before - 1.0).abs() >= 0.25;
+    let steady = cadence_before >= 60.0
+        && cadence_after >= 60.0
+        && (cadence_after / cadence_before - 1.0).abs() <= 0.12;
+    if !big || !steady || power_before < 30.0 || power_after < 30.0 {
+        return false;
+    }
+    let change = if ratio_after > ratio_before {
+        power_after / power_before - 1.0
+    } else {
+        power_before / power_after - 1.0
+    };
+    change < 0.10
+}
+
 impl TrainerController {
     pub fn new(tuning: ControlTuning) -> Self {
         Self {
@@ -153,6 +184,14 @@ impl TrainerController {
             erg_paused: false,
             since_sent: 0.0,
         }
+    }
+
+    /// Forgets what was sent, so the gear and the grade go out again (after
+    /// the trainer reconnected).
+    pub fn resend(&mut self) {
+        self.last_gear_sent = None;
+        self.last_grade_sent = None;
+        self.last_erg_sent = None;
     }
 
     /// Grade (percent) the trainer should simulate. Without virtual gears it is
@@ -171,7 +210,7 @@ impl TrainerController {
             road_grade_pct
         };
         let Some(gears) = self.gears.as_ref().filter(|_| !self.native_gears) else {
-            return scaled;
+            return scaled.clamp(MIN_GRADE_PCT, MAX_GRADE_PCT);
         };
         // Virtual shifting: the rider must feel the force of the virtual bike at
         // virtual speed, transferred through the gear ratio onto the flywheel.
@@ -184,7 +223,7 @@ impl TrainerController {
         let wanted = road_force * k;
         let aero_t = 0.5 * TRAINER_CW * v_t * v_t;
         let sin = ((wanted - aero_t) / (m * G) - TRAINER_CRR).clamp(-0.2, 0.2);
-        (sin.asin().tan() * 100.0).clamp(-10.0, 20.0)
+        (sin.asin().tan() * 100.0).clamp(MIN_GRADE_PCT, MAX_GRADE_PCT)
     }
 
     /// Returns the request to send this tick, if anything changed enough.
@@ -320,6 +359,42 @@ impl TrainerController {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grades_stay_within_what_the_kickr_can_simulate() {
+        let mut c = TrainerController::new(ControlTuning::default());
+        c.gears = Some(VirtualGears::default());
+        c.native_gears = true;
+        assert_eq!(
+            c.sim_grade_pct(-21.8, 1.0, &BikeParams::default(), 15.0),
+            -10.0
+        );
+        assert_eq!(
+            c.sim_grade_pct(24.0, 1.0, &BikeParams::default(), 3.0),
+            20.0
+        );
+        assert_eq!(
+            c.sim_grade_pct(-6.0, 1.0, &BikeParams::default(), 15.0),
+            -6.0
+        );
+    }
+
+    #[test]
+    fn ignored_shifts_are_told_from_working_ones() {
+        // From the ride where the KICKR stopped listening (trainer log).
+        // Working: 1.53 → 2.22 took the power from 146 to 534 W, 2.04 →
+        // 1.53 eased it from 231 to 199 W.
+        assert!(!shifts_ignored(1.53, 2.22, (146.0, 534.0), (115.0, 108.0)));
+        assert!(!shifts_ignored(2.04, 1.53, (231.0, 199.0), (99.0, 107.0)));
+        // Ignored: gear 24 down to gear 1 and back up at ~98 rpm.
+        assert!(shifts_ignored(5.49, 0.75, (162.0, 180.0), (100.0, 97.0)));
+        assert!(shifts_ignored(0.75, 2.22, (167.0, 180.0), (99.0, 97.0)));
+        // Small shifts, coasting and sprints that change the cadence say
+        // nothing.
+        assert!(!shifts_ignored(2.22, 2.40, (200.0, 200.0), (90.0, 90.0)));
+        assert!(!shifts_ignored(2.22, 3.03, (200.0, 200.0), (0.0, 0.0)));
+        assert!(!shifts_ignored(2.22, 3.03, (200.0, 200.0), (90.0, 120.0)));
+    }
 
     fn bike() -> BikeParams {
         BikeParams::default()

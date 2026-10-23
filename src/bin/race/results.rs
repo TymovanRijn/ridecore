@@ -143,6 +143,18 @@ fn results_ui(
                     .size(26.0),
                 );
             }
+            if res.stopped && !race.player().finished() {
+                ui.heading(
+                    egui::RichText::new(tf!(
+                        "Gestopt na {:.1} km · {} van {} op de weg",
+                        "Stopped after {:.1} km · {} of {} on the road",
+                        race.player().dist.max(0.0) / 1000.0,
+                        ordinal(race.position(race.human)),
+                        race.riders.len()
+                    ))
+                    .size(26.0),
+                );
+            }
             if let Some(line) = best_line(&res) {
                 ui.label(line);
             }
@@ -233,7 +245,7 @@ fn results_ui(
                 {
                     next.set(Screen::Setup);
                 }
-                if !watched {
+                if !watched && !res.stopped {
                     ui.label(
                         egui::RichText::new(t(
                             "Je kunt uitfietsen terwijl de rest binnenkomt.",

@@ -56,6 +56,9 @@ pub struct RaceRes {
     pub new_best: Option<bool>,
     /// Watching the bots race instead of riding.
     pub watch: Option<watch::Watch>,
+    /// You stopped before the line: the race stands still on the results
+    /// screen, where the ride can still go to Strava.
+    pub stopped: bool,
 }
 
 impl RaceRes {
@@ -70,6 +73,7 @@ impl RaceRes {
             best: best_ride(&race),
             new_best: None,
             watch: None,
+            stopped: false,
             race,
         }
     }
@@ -194,7 +198,7 @@ pub fn advance_race(
     screen: Res<State<Screen>>,
     mut next: ResMut<NextState<Screen>>,
 ) {
-    if res.paused {
+    if res.paused || res.stopped {
         return;
     }
     let dt = time.delta_secs().min(0.1);
@@ -274,12 +278,18 @@ fn save_unfinished(mut res: Option<ResMut<RaceRes>>, session: Option<Res<trainin
     let Some(res) = res.as_deref_mut() else {
         return;
     };
-    if session.is_none()
-        && res.saved.is_none()
-        && res.samples.len() >= 60
-        && std::env::var_os("RIDECORE_SHOTS").is_none()
-    {
+    if session.is_none() && res.can_save_unfinished() {
         res.saved = Some(share::save_ride(res));
+    }
+}
+
+impl RaceRes {
+    /// A ride left before the line that is long enough to keep.
+    pub fn can_save_unfinished(&self) -> bool {
+        self.watch.is_none()
+            && self.saved.is_none()
+            && self.samples.len() >= 60
+            && std::env::var_os("RIDECORE_SHOTS").is_none()
     }
 }
 

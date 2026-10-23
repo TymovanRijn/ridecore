@@ -404,6 +404,7 @@ fn hud(
     camera: Query<(&Camera, &GlobalTransform)>,
     riders: Query<(&RiderModel, &GlobalTransform)>,
     ghost: Query<&GlobalTransform, With<GhostRider>>,
+    session: Option<Res<crate::training::Session>>,
     mut shown: Local<Option<usize>>,
     mut smooth: Local<Smoothed>,
 ) -> Result {
@@ -461,7 +462,16 @@ fn hud(
                             )
                         {
                             menu.open = false;
-                            next.set(Screen::Setup);
+                            // A ride worth keeping goes to the results, to
+                            // be uploaded; otherwise straight to the menu.
+                            if session.is_none() && res.can_save_unfinished() {
+                                res.saved = Some(crate::share::save_ride(&res));
+                                res.stopped = true;
+                                res.paused = false;
+                                next.set(Screen::Results);
+                            } else {
+                                next.set(Screen::Setup);
+                            }
                         }
                     });
                 });
@@ -698,6 +708,18 @@ fn ride_overlay(
                         }
                     }
                 });
+                // The trainer dropped out (or was dropped for ignoring
+                // its commands): say it's coming back.
+                if !settings.keyboard && trainer.name.is_none() {
+                    ui.label(
+                        egui::RichText::new(t(
+                            "Trainer opnieuw verbinden…",
+                            "Reconnecting the trainer…",
+                        ))
+                        .size(13.0)
+                        .color(BAD),
+                    );
+                }
                 if settings.keyboard {
                     ui.label(
                         egui::RichText::new(t(

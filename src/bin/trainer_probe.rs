@@ -1,8 +1,10 @@
 //! Lists what the trainer offers over Bluetooth and, if it speaks Zwift's
 //! own trainer protocol, says hello on it and prints its riding data for
-//! 20 seconds. Sends no resistance.
+//! 20 seconds. Sends no resistance, unless `--commands`: then it also sends
+//! a gear and a flat road, each followed by the settings request, to show
+//! how the trainer acknowledges them.
 //!
-//!     cargo run --release --bin trainer_probe
+//!     cargo run --release --bin trainer_probe [-- --commands]
 
 use std::time::Duration;
 
@@ -73,8 +75,51 @@ async fn main() -> anyhow::Result<()> {
     trainer
         .write(&rx, &[0x41, 0x08, 0x05], WriteType::WithoutResponse)
         .await?;
-    let end = tokio::time::Instant::now() + Duration::from_secs(20);
-    while let Ok(Some(n)) = tokio::time::timeout_at(end, notes.next()).await {
+    let commands = std::env::args().any(|a| a == "--commands");
+    let start = tokio::time::Instant::now();
+    let end = start + Duration::from_secs(20);
+    let mut sent = 0;
+    loop {
+        if commands && sent < 2 && start.elapsed() > Duration::from_secs(4 + 5 * sent) {
+            let req = if sent == 0 {
+                ftms::ControlRequest::SetGear {
+                    ratio: 2.4,
+                    rider_kg: 75.0,
+                    bike_kg: 8.0,
+                }
+            } else {
+                ftms::ControlRequest::SetSimulation {
+                    wind_mps: 0.0,
+                    grade_pct: 0.0,
+                    crr: ridecore::trainer::TRAINER_CRR,
+                    cw: ridecore::trainer::TRAINER_CW,
+                }
+            };
+            let bytes = ridecore::zwift_hub::encode(&req).expect("hub command");
+            println!(">> {req:?}");
+            trainer
+                .write(&rx, &bytes, WriteType::WithoutResponse)
+                .await?;
+            trainer
+                .write(
+                    &rx,
+                    &ridecore::zwift_hub::SETTINGS_REQUEST,
+                    WriteType::WithoutResponse,
+                )
+                .await?;
+            sent += 1;
+        }
+        let Ok(Some(n)) = tokio::time::timeout_at(
+            end.min(tokio::time::Instant::now() + Duration::from_millis(500)),
+            notes.next(),
+        )
+        .await
+        else {
+            if tokio::time::Instant::now() >= end {
+                break;
+            }
+            continue;
+        };
         let hex: Vec<String> = n.value.iter().map(|b| format!("{b:02X}")).collect();
         println!(
             "{} {} {:?}",

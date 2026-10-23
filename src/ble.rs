@@ -252,6 +252,13 @@ async fn session(
             }
             cmd = commands.recv() => {
                 let Some(req) = cmd else { break Ok(()) };
+                if req == ControlRequest::Reconnect {
+                    trainer.disconnect().await.ok();
+                    break Err(anyhow!(crate::i18n::t(
+                        "trainer reageerde niet meer, opnieuw verbinden",
+                        "trainer stopped responding, reconnecting"
+                    )));
+                }
                 if matches!(req, ControlRequest::SetSimulation { .. } | ControlRequest::SetTargetPower { .. }) {
                     last_target = Some(req);
                 }

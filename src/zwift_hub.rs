@@ -107,7 +107,9 @@ pub fn encode(req: &ControlRequest) -> Option<Vec<u8>> {
             uint(&mut phys, 5, round_u32(rider_kg * 100.0));
             message(&mut cmd, 5, &phys);
         }
-        ControlRequest::RequestControl | ControlRequest::Start => return None,
+        ControlRequest::RequestControl | ControlRequest::Start | ControlRequest::Reconnect => {
+            return None;
+        }
     }
     let mut out = vec![OP_COMMAND];
     out.extend(cmd);
