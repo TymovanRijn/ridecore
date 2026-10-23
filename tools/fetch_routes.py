@@ -10,7 +10,8 @@ tools/cache/ so reruns are cheap and polite to the free services.
 
 Data: © OpenStreetMap contributors (ODbL); EU-DEM v1.1 © European Union,
 Copernicus; terrain tiles by Mapzen/Tilezen on AWS Open Data (SRTM, EU-DEM
-and other public sources).
+and other public sources); Japan: elevation tiles © Geospatial Information
+Authority of Japan (GSI).
 
 Needs Pillow for the terrain tiles: pip install pillow
 
@@ -24,6 +25,7 @@ import math
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -79,7 +81,19 @@ ROUTES = [
     ("box-hill", "Box Hill (Zig Zag Road)", "Surrey, Verenigd Koninkrijk", ["Dorking|gb", "Burford Bridge|gb", "Box Hill, Surrey|gb", "Headley, Surrey|gb", "Dorking|gb"], 15.0, 250, 12),
     ("afsluitdijk", "Afsluitdijk", "Friesland/Noord-Holland, Nederland", ["Den Oever|nl", "Kornwerderzand|nl", "Zurich, Friesland|nl"], 32.0, 10, 4),
     ("kust-noordwijk", "Kustroute Zandvoort–Noordwijk", "Zuid-Holland, Nederland", ["Zandvoort|nl", "Langevelderslag|nl", "Noordwijk|nl"], 17.0, 20, 6),
+    # Fuchū, west along the Kōshū Kaidō (Route 20) through
+    # Hino, Hachiōji and its ginkgo avenue to Takao, over the Ōtarumi Pass to
+    # Lake Sagami, and up the Jinba Kaidō from Fujino to the Wada Pass.
+    # Waypoints on Route 20 itself keep the router off the bypasses.
+    ("tokyo-wada", "Tokio – Wada-tōge", "Tokio/Kanagawa, Japan", [(35.6712, 139.4930), (35.6828, 139.4123), (35.66078, 139.32331), (35.64256, 139.2802), (35.63831, 139.27124), (35.63286, 139.27105), (35.6207, 139.2278), (35.6577, 139.1685)], 50.0, 950, 16),
 ]
+
+# Japanese routes take their heights from GSI's own elevation model (5 m
+# laser survey, 10 m elsewhere) instead of EU-DEM.
+JAPAN = {"tokyo-wada"}
+# Horizon grids reaching further than usual, as (spacing m, reach m,
+# Terrarium zoom): Mount Fuji stands 50 to 80 km from the Tokyo route.
+FAR_HORIZON = {"tokyo-wada": (600.0, 80_000.0, 10)}
 
 
 def http_json(url, data=None, cache_key=None, pause=1.1):
@@ -185,16 +199,16 @@ TERRARIUM_ZOOM = 12
 _tiles = {}
 
 
-def terrarium_tile(x, y):
+def terrarium_tile(x, y, zoom=TERRARIUM_ZOOM):
     """One Terrarium elevation tile (AWS Open Data, Mapzen/Tilezen): RGB
     encodes height as R*256 + G + B/256 - 32768 meters."""
     from PIL import Image  # pip install pillow
 
-    key = (x, y)
+    key = (zoom, x, y)
     if key not in _tiles:
-        path = os.path.join(CACHE, f"terrarium_{TERRARIUM_ZOOM}_{x}_{y}.png")
+        path = os.path.join(CACHE, f"terrarium_{zoom}_{x}_{y}.png")
         if not os.path.exists(path):
-            url = f"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{TERRARIUM_ZOOM}/{x}/{y}.png"
+            url = f"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{zoom}/{x}/{y}.png"
             req = urllib.request.Request(url, headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=60) as r, open(path, "wb") as f:
                 f.write(r.read())
@@ -202,15 +216,21 @@ def terrarium_tile(x, y):
     return _tiles[key]
 
 
-def terrain_height(lat, lon):
-    """Bilinear terrain height from Terrarium tiles."""
-    n = 2**TERRARIUM_ZOOM
+def tile_pixel(lat, lon, zoom):
+    """Fractional global pixel position of a point in XYZ tiles."""
+    n = 2**zoom
     fx = (lon + 180.0) / 360.0 * n * 256
     lat_r = math.radians(lat)
     fy = (1.0 - math.asinh(math.tan(lat_r)) / math.pi) / 2.0 * n * 256
+    return fx, fy
+
+
+def terrain_height(lat, lon, zoom=TERRARIUM_ZOOM):
+    """Bilinear terrain height from Terrarium tiles."""
+    fx, fy = tile_pixel(lat, lon, zoom)
 
     def px(gx, gy):
-        tile = terrarium_tile(gx // 256, gy // 256)
+        tile = terrarium_tile(gx // 256, gy // 256, zoom)
         r, g, b = tile[gx % 256, gy % 256]
         return r * 256 + g + b / 256 - 32768
 
@@ -223,6 +243,158 @@ def terrain_height(lat, lon):
 
 def elevations_terrain(points):
     return [terrain_height(lat, lon) for lat, lon in points]
+
+
+_gsi = {}
+
+
+def gsi_tile(kind, z, x, y):
+    """One GSI elevation tile (Geospatial Information Authority of Japan):
+    RGB is a 24-bit count of centimeters, two's complement, with 2^23 for
+    no data. `None` where GSI has no tile."""
+    from PIL import Image
+
+    key = (kind, z, x, y)
+    if key not in _gsi:
+        path = os.path.join(CACHE, f"gsi_{kind}_{z}_{x}_{y}.png")
+        if not os.path.exists(path):
+            url = f"https://cyberjapandata.gsi.go.jp/xyz/{kind}/{z}/{x}/{y}.png"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": UA})
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    data = r.read()
+            except urllib.error.HTTPError as e:
+                if e.code != 404:
+                    raise
+                data = b""
+            with open(path, "wb") as f:
+                f.write(data)
+            time.sleep(0.05)
+        _gsi[key] = Image.open(path).convert("RGB").load() if os.path.getsize(path) else None
+    return _gsi[key]
+
+
+def gsi_height(lat, lon, kind, z):
+    """Bilinear height from GSI tiles; `None` where any corner has no data."""
+    fx, fy = tile_pixel(lat, lon, z)
+    # Pixel values are for pixel centers.
+    fx, fy = fx - 0.5, fy - 0.5
+
+    def px(gx, gy):
+        tile = gsi_tile(kind, z, gx // 256, gy // 256)
+        if tile is None:
+            return None
+        r, g, b = tile[gx % 256, gy % 256]
+        v = (r << 16) | (g << 8) | b
+        if v == 1 << 23:
+            return None
+        return (v - (1 << 24) if v > 1 << 23 else v) * 0.01
+
+    x0, y0 = math.floor(fx), math.floor(fy)
+    tx, ty = fx - x0, fy - y0
+    c = [px(x0, y0), px(x0 + 1, y0), px(x0, y0 + 1), px(x0 + 1, y0 + 1)]
+    if any(h is None for h in c):
+        return None
+    top = c[0] * (1 - tx) + c[1] * tx
+    bottom = c[2] * (1 - tx) + c[3] * tx
+    return top * (1 - ty) + bottom * ty
+
+
+def japan_height(lat, lon, fine=True):
+    """GSI's 5 m laser model where it exists (`fine`), its 10 m model
+    elsewhere, Terrarium over the sea."""
+    h = gsi_height(lat, lon, "dem5a_png", 15) if fine else None
+    if h is None:
+        h = gsi_height(lat, lon, "dem_png", 14)
+    if h is None:
+        h = terrain_height(lat, lon)
+    return h
+
+
+def overpass_post(query):
+    """An Overpass query (cached), retried while the servers are busy."""
+    key = "osm_" + hashlib.sha1(query.encode()).hexdigest()
+    path = os.path.join(CACHE, key + ".json")
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    data = urllib.parse.urlencode({"data": query}).encode()
+    for attempt in range(8):
+        try:
+            req = urllib.request.Request("https://overpass-api.de/api/interpreter", data=data, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=300) as r:
+                out = json.load(r)
+            break
+        except Exception as e:
+            wait = 15 * (attempt + 1)
+            print(f"  overpass retry in {wait}s after {e}", file=sys.stderr)
+            time.sleep(wait)
+    else:
+        raise RuntimeError("overpass gave up")
+    with open(path, "w") as f:
+        json.dump(out, f)
+    return out
+
+
+def bearing_xy(a, b):
+    k = math.cos(math.radians(a[0]))
+    return math.atan2((b[0] - a[0]) * 110_540.0, (b[1] - a[1]) * k * 111_320.0)
+
+
+def level_structures(line, ele):
+    """A bare-earth model has the river under a bridge and the hill over a
+    tunnel. Finds the stretches of the route on OpenStreetMap bridges and in
+    tunnels and runs the road straight across them."""
+    probe = [line[0]]
+    for p in line[1:]:
+        if haversine(probe[-1], p) >= 100.0:
+            probe.append(p)
+    coords = ",".join(f"{lat:.5f},{lon:.5f}" for lat, lon in probe)
+    q = f'[out:json][timeout:180];way["highway"]["bridge"~"^(yes|viaduct)$"](around:25,{coords});out geom;way["highway"]["tunnel"="yes"](around:25,{coords});out geom;'
+    segs = []
+    for el in overpass_post(q)["elements"]:
+        g = [(p["lat"], p["lon"]) for p in el.get("geometry", [])]
+        segs += list(zip(g, g[1:]))
+
+    def on_structure(i):
+        p = line[i]
+        q = line[min(i + 1, len(line) - 1)] if i + 1 < len(line) else p
+        o = line[max(i - 1, 0)]
+        heading = bearing_xy(o, q)
+        k = math.cos(math.radians(p[0]))
+        for a, b in segs:
+            ax, az = (a[1] - p[1]) * k * 111_320.0, (a[0] - p[0]) * 110_540.0
+            bx, bz = (b[1] - p[1]) * k * 111_320.0, (b[0] - p[0]) * 110_540.0
+            dx, dz = bx - ax, bz - az
+            ll = dx * dx + dz * dz
+            if ll == 0:
+                continue
+            t = max(0.0, min(1.0, -(ax * dx + az * dz) / ll))
+            if math.hypot(ax + t * dx, az + t * dz) > 7.0:
+                continue
+            d = abs((math.atan2(dz, dx) - heading + math.pi) % (2 * math.pi) - math.pi)
+            if min(d, math.pi - d) < math.radians(30):
+                return True
+        return False
+
+    marked = [on_structure(i) for i in range(len(line))]
+    ele = list(ele)
+    i, spans = 0, 0
+    while i < len(line):
+        if not marked[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(line) and marked[j + 1]:
+            j += 1
+        a, b = max(0, i - 1), min(len(line) - 1, j + 1)
+        for k in range(a + 1, b):
+            t = (k - a) / (b - a)
+            ele[k] = ele[a] * (1 - t) + ele[b] * t
+        spans += 1
+        i = j + 1
+    print(f"  {spans} bridges and tunnels levelled ({sum(marked)} points)")
+    return ele
 
 
 def smooth(values, window):
@@ -248,7 +420,7 @@ def projector(points):
     return (lat0, lon0), to_xz, to_latlon
 
 
-def terrain(points, to_xz, to_latlon):
+def terrain(points, to_xz, to_latlon, height=terrain_height):
     """Terrain heights on a grid of cells within reach of the road."""
     cells = set()
     reach = int(TERRAIN_REACH_M / TERRAIN_SPACING_M) + 1
@@ -261,11 +433,11 @@ def terrain(points, to_xz, to_latlon):
                     cells.add((ci + di, cj + dj))
     cells = sorted(cells)
     latlons = [to_latlon(i * TERRAIN_SPACING_M, j * TERRAIN_SPACING_M) for i, j in cells]
-    heights = elevations_terrain(latlons)
+    heights = [height(lat, lon) for lat, lon in latlons]
     return [[i, j, round(h, 1)] for (i, j), h in zip(cells, heights)]
 
 
-def regional(points, to_xz, to_latlon):
+def regional(points, to_xz, to_latlon, height=terrain_height):
     """A coarse height grid over the whole area, for valleys and slopes up to
     the horizon. Stored as a full rectangle, row by row."""
     xs, zs = zip(*(to_xz(lat, lon) for lat, lon in points[::5]))
@@ -274,7 +446,7 @@ def regional(points, to_xz, to_latlon):
     i1 = math.ceil((max(xs) + REGION_MARGIN_M) / REGION_SPACING_M)
     j1 = math.ceil((max(zs) + REGION_MARGIN_M) / REGION_SPACING_M)
     latlons = [to_latlon(i * REGION_SPACING_M, j * REGION_SPACING_M) for j in range(j0, j1 + 1) for i in range(i0, i1 + 1)]
-    heights = elevations_terrain(latlons)
+    heights = [height(lat, lon) for lat, lon in latlons]
     return {"spacing_m": REGION_SPACING_M, "i0": i0, "j0": j0, "ni": i1 - i0 + 1, "nj": j1 - j0 + 1, "heights": [round(h) for h in heights]}
 
 
@@ -288,11 +460,11 @@ def horizon(rid):
     _, to_xz, to_latlon = projector(line)
     xs, zs = zip(*(to_xz(lat, lon) for lat, lon in line[::5]))
     cx, cz = (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2
-    s = HORIZON_SPACING_M
-    i0, j0 = math.floor((cx - HORIZON_REACH_M) / s), math.floor((cz - HORIZON_REACH_M) / s)
-    i1, j1 = math.ceil((cx + HORIZON_REACH_M) / s), math.ceil((cz + HORIZON_REACH_M) / s)
+    s, reach, zoom = FAR_HORIZON.get(rid, (HORIZON_SPACING_M, HORIZON_REACH_M, TERRARIUM_ZOOM))
+    i0, j0 = math.floor((cx - reach) / s), math.floor((cz - reach) / s)
+    i1, j1 = math.ceil((cx + reach) / s), math.ceil((cz + reach) / s)
     latlons = [to_latlon(i * s, j * s) for j in range(j0, j1 + 1) for i in range(i0, i1 + 1)]
-    heights = elevations_terrain(latlons)
+    heights = [terrain_height(lat, lon, zoom) for lat, lon in latlons]
     data["horizon"] = {"spacing_m": s, "i0": i0, "j0": j0, "ni": i1 - i0 + 1, "nj": j1 - j0 + 1, "heights": [round(h) for h in heights]}
     with open(path, "w") as f:
         json.dump(data, f, separators=(",", ":"))
@@ -319,7 +491,12 @@ def build(rid, name, region, waypoints, ref_km, ref_gain, ref_max):
     line = resample(route(pts, "bike" if rid in BIKE_PROFILE else "car"), STEP_M)
     # ~180 m smoothing: DEM cells on hairpins and in cuttings mix in the
     # slope beside the road; the road itself changes grade gradually.
-    ele = smooth(elevations_eudem(line), 9)
+    if rid in JAPAN:
+        # The 5 m model is sharp enough for a lighter smoothing (~100 m).
+        raw = level_structures(line, [japan_height(lat, lon) for lat, lon in line])
+        ele = smooth(raw, 5)
+    else:
+        ele = smooth(elevations_eudem(line), 9)
     dist = [0.0]
     for a, b in zip(line, line[1:]):
         dist.append(dist[-1] + haversine(a, b))
@@ -327,8 +504,9 @@ def build(rid, name, region, waypoints, ref_km, ref_gain, ref_max):
     gain = sum(max(0.0, b - a) for a, b in zip(ele, ele[1:]))
     looped = haversine(line[0], line[-1]) < 250 and len(line) > 10
     origin, to_xz, to_latlon = projector(line)
-    grid = terrain(line, to_xz, to_latlon)
-    area = regional(line, to_xz, to_latlon)
+    height = (lambda lat, lon: japan_height(lat, lon, fine=False)) if rid in JAPAN else terrain_height
+    grid = terrain(line, to_xz, to_latlon, height)
+    area = regional(line, to_xz, to_latlon, height)
     max_grade = max(((ele[i + 10] - ele[i]) / (dist[i + 10] - dist[i]) * 100 for i in range(len(ele) - 10)), default=0)
     out = {
         "id": rid,
@@ -341,6 +519,8 @@ def build(rid, name, region, waypoints, ref_km, ref_gain, ref_max):
         "terrain": grid,
         "area": area,
     }
+    if rid in JAPAN:
+        out["style"] = "japan"
     with open(os.path.join(OUT, rid + ".json"), "w") as f:
         json.dump(out, f, separators=(",", ":"))
     km = dist[-1] / 1000

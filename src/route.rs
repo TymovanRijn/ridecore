@@ -22,11 +22,22 @@ pub struct Route {
     pub geo: Option<Arc<Geo>>,
 }
 
+/// How the country looks: its houses, woods and street furniture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Style {
+    #[default]
+    Europe,
+    /// Tiled roofs, cedar woods, utility poles, guardrails and torii.
+    Japan,
+}
+
 /// Where a real route lies on Earth and the terrain around it.
 #[derive(Debug)]
 pub struct Geo {
     /// Projection origin (lat, lon); local x is east, z is south, in meters.
     pub origin: (f64, f64),
+    pub style: Style,
     /// (lat, lon) of every profile point.
     pub latlon: Vec<(f64, f64)>,
     corridor_spacing: f32,
@@ -333,6 +344,8 @@ struct RouteFile {
     area: RegionFile,
     #[serde(default)]
     horizon: Option<RegionFile>,
+    #[serde(default)]
+    style: Style,
 }
 
 #[derive(Deserialize)]
@@ -377,6 +390,7 @@ fn parse(json: &str) -> Result<Route, serde_json::Error> {
         looped: f.looped,
         geo: Some(Arc::new(Geo {
             origin: (f.origin[0], f.origin[1]),
+            style: f.style,
             latlon,
             corridor_spacing: f.terrain_spacing_m,
             corridor,

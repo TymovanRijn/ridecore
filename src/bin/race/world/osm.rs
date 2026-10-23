@@ -24,8 +24,9 @@ fn shade(c: Rgba, k: f32) -> Rgba {
     [c[0] * k, c[1] * k, c[2] * k, c[3]]
 }
 
-/// Ground color by land cover; `None` where the map doesn't say.
-pub fn cover_color(cover: Cover, p: Vec3) -> Option<Rgba> {
+/// Ground color by land cover; `None` where the map doesn't say. Japanese
+/// towns are paved from wall to wall.
+pub fn cover_color(cover: Cover, p: Vec3, japan: bool) -> Option<Rgba> {
     let k = fbm(p.x / 14.0 + 31.0, p.z / 14.0) * 0.05;
     let m = fbm(p.x / 55.0, p.z / 55.0 - 9.0) * 0.5 + 0.5;
     Some(match cover {
@@ -33,6 +34,10 @@ pub fn cover_color(cover: Cover, p: Vec3) -> Option<Rgba> {
         Cover::Forest => forest_floor(rgb(0.13 + k, 0.23 + 0.04 * m + k, 0.1)),
         Cover::Farmland => super::zones::field_color(p.x, p.z, 0x5eed),
         Cover::Meadow => rgb(0.31 + k + 0.04 * m, 0.55 + 0.08 * m + k, 0.21),
+        Cover::Town if japan => {
+            let g = 0.47 + k + 0.05 * m;
+            rgb(g, g, g - 0.02)
+        }
         // Gardens and hedges between the houses.
         Cover::Town => rgb(0.34 + k + 0.06 * m, 0.5 + k, 0.27 + 0.04 * m),
         Cover::Industry => rgb(0.46 + k, 0.45 + k, 0.42 + k),
@@ -90,6 +95,7 @@ fn beech(t: &mut Tris, p: Vec3, s: f32, detail: Detail, rng: &mut Rng) {
 /// Trees where the map has woods, densest along the road. Distant ones go
 /// in `far`, which casts no shadows.
 pub fn forest_trees(t: &mut Tris, far: &mut Tris, index: &RoadIndex, map: &MapData, rng: &mut Rng) {
+    let japan = index.japan();
     let (min, max) = index.extent(900.0);
     // Sample on a jittered grid; spacing grows with distance from the road.
     let cell = 7.0;
@@ -126,7 +132,9 @@ pub fn forest_trees(t: &mut Tris, far: &mut Tris, index: &RoadIndex, map: &MapDa
                 d if d > 25.0 => (&mut *t, Detail::Mid, s),
                 _ => (&mut *t, Detail::Near, s),
             };
-            if conifer {
+            if japan {
+                super::japan::tree(t, p, s, detail, rng);
+            } else if conifer {
                 spruce(t, p, s, detail, rng);
             } else {
                 beech(t, p, s, detail, rng);
@@ -153,7 +161,7 @@ const ROOFS: [Rgba; 4] = [
 ];
 const WINDOW: Rgba = rgb(0.12, 0.14, 0.18);
 
-fn area(ring: &[Vec2]) -> f32 {
+pub(super) fn area(ring: &[Vec2]) -> f32 {
     let mut s = 0.0;
     for k in 0..ring.len() {
         let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
@@ -164,7 +172,7 @@ fn area(ring: &[Vec2]) -> f32 {
 
 /// Triangulates a simple polygon (counter-clockwise in x/z) by ear
 /// clipping; falls back to a fan if it gets stuck.
-fn triangulate(ring: &[Vec2]) -> Vec<[usize; 3]> {
+pub(super) fn triangulate(ring: &[Vec2]) -> Vec<[usize; 3]> {
     let mut idx: Vec<usize> = (0..ring.len()).collect();
     let mut out = Vec::new();
     let cross = |o: Vec2, a: Vec2, b: Vec2| (a - o).perp_dot(b - o);
@@ -206,6 +214,7 @@ fn triangulate(ring: &[Vec2]) -> Vec<[usize; 3]> {
 /// The real buildings near the road, extruded from their footprints: small
 /// rectangular ones get a slate gable roof, the rest a flat or low roof.
 pub fn buildings(t: &mut Tris, index: &RoadIndex, map: &MapData, rng: &mut Rng) {
+    let japan = index.japan();
     for b in &map.buildings {
         let mut ring: Vec<Vec2> = b.footprint.iter().map(|p| Vec2::new(p[0], p[1])).collect();
         // Drop repeated corners.
@@ -230,13 +239,19 @@ pub fn buildings(t: &mut Tris, index: &RoadIndex, map: &MapData, rng: &mut Rng) 
         let heights: Vec<f32> = ring.iter().map(|p| index.surface(p.x, p.y)).collect();
         let base = heights.iter().copied().fold(f32::MAX, f32::min) - 0.4;
         let ground_top = heights.iter().copied().fold(f32::MIN, f32::max);
+        if japan {
+            super::japan::building(t, &ring, a, base, ground_top, b, index, rng);
+            continue;
+        }
         let floors = b.levels.unwrap_or(match b.kind {
             BuildingKind::Shed => 1,
             _ if a > 400.0 => 3,
             _ => 2,
         }) as f32;
         let (wall_h, wall, roof) = match b.kind {
-            BuildingKind::Church => (11.0, rgb(0.6, 0.58, 0.54), rgb(0.2, 0.22, 0.26)),
+            BuildingKind::Church | BuildingKind::Temple => {
+                (11.0, rgb(0.6, 0.58, 0.54), rgb(0.2, 0.22, 0.26))
+            }
             BuildingKind::Shed if a > 500.0 => (
                 7.0 + floors,
                 shade(rgb(0.6, 0.62, 0.64), rng.range(0.8, 1.05)),
@@ -316,7 +331,7 @@ pub fn buildings(t: &mut Tris, index: &RoadIndex, map: &MapData, rng: &mut Rng) 
 
 /// Center, half width, half depth and yaw of a footprint that is close to
 /// a rectangle, with the ridge along its longer side.
-fn oriented_rect(ring: &[Vec2]) -> Option<(Vec2, f32, f32, f32)> {
+pub(super) fn oriented_rect(ring: &[Vec2]) -> Option<(Vec2, f32, f32, f32)> {
     let (mut best_len, mut dir) = (0.0, Vec2::X);
     for k in 0..ring.len() {
         let e = ring[(k + 1) % ring.len()] - ring[k];
@@ -427,18 +442,31 @@ pub fn water(index: &RoadIndex, map: &MapData) -> Grid {
                 let (x, z) = (x0 + i as f32 * step, z0 + j as f32 * step);
                 Vec3::new(x, level(x, z), z)
             };
-            let a = grid.corner((i, j), || at(i, j));
-            let b = grid.corner((i + 1, j), || at(i + 1, j));
-            let c = grid.corner((i + 1, j + 1), || at(i + 1, j + 1));
-            let d = grid.corner((i, j + 1), || at(i, j + 1));
+            // Water lies flat: a mapped stream down a steep valley would
+            // hang over the slope as a sheet.
+            let corners = [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)];
+            let (lo, hi) = corners.iter().fold((f32::MAX, f32::MIN), |(lo, hi), c| {
+                (lo.min(c.y), hi.max(c.y))
+            });
+            if hi - lo > 2.5 {
+                continue;
+            }
+            let a = grid.corner((i, j), || corners[0]);
+            let b = grid.corner((i + 1, j), || corners[1]);
+            let c = grid.corner((i + 1, j + 1), || corners[2]);
+            let d = grid.corner((i, j + 1), || corners[3]);
             grid.cell(a, b, c, d);
         }
     }
     grid
 }
 
-/// Cows in the meadows next to the road (Belgian Blues, mostly).
+/// Cows in the meadows next to the road (Belgian Blues, mostly). None in
+/// Japan, where cattle stay in their sheds.
 pub fn herds(t: &mut Tris, index: &RoadIndex, map: &MapData, rng: &mut Rng) {
+    if index.japan() {
+        return;
+    }
     let (min, max) = index.extent(250.0);
     for _ in 0..1800 {
         let (x, z) = (rng.range(min.x, max.x), rng.range(min.y, max.y));

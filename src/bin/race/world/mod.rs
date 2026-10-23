@@ -4,6 +4,7 @@
 //! are merged into a few large meshes so the scene stays fast.
 
 mod ground;
+mod japan;
 mod osm;
 mod props;
 pub mod sky;
@@ -116,6 +117,8 @@ struct Near {
     /// Meters to the right of the road (negative = left).
     lateral: f32,
     road_elevation: f32,
+    /// Travel direction of the road there.
+    dir: Vec3,
     zone: Zone,
     seed: u64,
 }
@@ -190,6 +193,13 @@ impl RoadIndex {
         }
     }
 
+    /// Japanese houses, woods and street furniture.
+    fn japan(&self) -> bool {
+        self.geo
+            .as_ref()
+            .is_some_and(|g| g.style == ridecore::route::Style::Japan)
+    }
+
     /// Height of the terrain mesh's corner `(i, j)` (at `CELL_M` steps).
     fn corner_height(&self, i: i32, j: i32) -> f32 {
         let h = self.height(i as f32 * CELL_M, j as f32 * CELL_M);
@@ -223,6 +233,7 @@ impl RoadIndex {
                     dist,
                     lateral: (Vec3::new(x, rp.pos.y, z) - rp.pos).dot(right),
                     road_elevation: rp.pos.y,
+                    dir: rp.dir,
                     zone,
                     seed,
                 }
@@ -231,6 +242,7 @@ impl RoadIndex {
                 dist: 400.0,
                 lateral: 400.0,
                 road_elevation: self.mean_elevation,
+                dir: Vec3::X,
                 zone: Zone::Meadow,
                 seed: 0,
             },
@@ -325,7 +337,9 @@ impl RoadIndex {
         if p.y > SNOW_LINE_M + fbm(p.x / 80.0, p.z / 80.0) * 120.0 {
             return rgb(0.94, 0.95, 0.98);
         }
-        if slope_y < 0.86 || (p.y > TREE_LINE_M + 250.0 && slope_y < 0.93) {
+        // Japan's woods cover even the steep slopes.
+        let rock_below = if self.japan() { 0.6 } else { 0.86 };
+        if slope_y < rock_below || (p.y > TREE_LINE_M + 250.0 && slope_y < 0.93) {
             let g = 0.45 + fbm(p.x / 9.0, p.z / 9.0) * 0.1;
             return rgb(g, g * 0.97, g * 0.9); // bare rock on steep slopes
         }
@@ -335,7 +349,7 @@ impl RoadIndex {
         }
         if let Some(c) = self
             .map()
-            .and_then(|m| osm::cover_color(m.cover(p.x, p.z), p))
+            .and_then(|m| osm::cover_color(m.cover(p.x, p.z), p, self.japan()))
         {
             return c;
         }
@@ -551,7 +565,8 @@ fn spawn_world(
         ..default()
     });
 
-    let [ground_surface, asphalt, scenery_surface] = terrain::materials(&mut images, &mut surfaces);
+    let [ground_surface, asphalt, scenery_surface] =
+        terrain::materials(&mut images, &mut surfaces, index.japan());
     let (road, lines) = road_meshes(course, &ds);
     part(&mut commands, &mut meshes, road, asphalt, false);
     part(
@@ -630,6 +645,10 @@ fn spawn_world(
             osm::forest_trees(&mut scenery, &mut far_trees, &index, map, &mut rng);
             osm::buildings(&mut scenery, &index, map, &mut rng);
             osm::herds(&mut scenery, &index, map, &mut rng);
+            if index.japan() {
+                japan::infill(&mut scenery, &index, course, map, &mut rng);
+                japan::street(&mut scenery, &index, course, Some(map), &mut rng);
+            }
             let roads = osm::side_roads(&index, map);
             for tile in roads.split(TILE_M) {
                 part(
@@ -773,7 +792,14 @@ fn spawn_world(
         );
     }
     for mut fog in &mut fog {
-        let visibility = if real_horizon {
+        // A horizon grid reaching far beyond the route is meant to be seen.
+        let far_horizon = geo
+            .as_ref()
+            .and_then(|g| g.horizon())
+            .is_some_and(|(_, [x0, z0, x1, z1])| (x1 - x0).min(z1 - z0) > 80_000.0);
+        let visibility = if far_horizon {
+            crate::camera::CRISP_M
+        } else if real_horizon {
             crate::camera::CLEAR_M
         } else {
             crate::camera::HAZY_M
@@ -1066,6 +1092,7 @@ fn roadside(t: &mut Tris, index: &RoadIndex, course: &Course, rng: &mut Rng) -> 
     let step = 6.0;
     // With real map data the buildings, woods and herds come from the map.
     let invented = index.map().is_none();
+    let japan = index.japan();
     let mut d = 0.0;
     while d < lap {
         let zone = index.zones.at(d);
@@ -1102,7 +1129,7 @@ fn roadside(t: &mut Tris, index: &RoadIndex, course: &Course, rng: &mut Rng) -> 
                             rng,
                         );
                     }
-                    if rng.chance(0.08) {
+                    if !japan && rng.chance(0.08) {
                         props::hay_bale(
                             t,
                             ground_at(index, course, d, side * rng.range(20.0, 110.0)),
@@ -1150,7 +1177,7 @@ fn roadside(t: &mut Tris, index: &RoadIndex, course: &Course, rng: &mut Rng) -> 
                 }
                 Zone::Forest => {}
                 Zone::Meadow => {
-                    if (d / step) as i64 % 3 == 0 {
+                    if !japan && (d / step) as i64 % 3 == 0 {
                         let a = ground_at(index, course, d, side * 7.2);
                         let b = ground_at(index, course, d + step * 3.0, side * 7.2);
                         props::fence(t, a, b, rgb(0.48, 0.36, 0.25));
@@ -1660,6 +1687,20 @@ mod tests {
         let zones = ZoneMap::new(&course, 7, route.geo.is_none());
         let index = RoadIndex::new(center, zones, route.geo.clone());
         (course, index)
+    }
+
+    #[test]
+    fn the_tokyo_route_gets_japanese_streets() {
+        let route = real_routes().iter().find(|r| r.id == "tokyo-wada").unwrap();
+        let (course, index) = index_for(route);
+        assert!(index.japan());
+        let map = index.map().expect("map data");
+        assert!(map.places.iter().filter(|p| p.kind == "shrine").count() > 10);
+        let mut t = Tris::default();
+        japan::street(&mut t, &index, &course, Some(map), &mut Rng::new(1));
+        // Utility poles and their cables all along the 50 km.
+        let tris = t.pos.len() / 3;
+        assert!((50_000..1_500_000).contains(&tris), "{tris}");
     }
 
     #[test]

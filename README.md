@@ -9,7 +9,7 @@ A free, open-source indoor cycling app written in Rust with [Bevy](https://bevye
 
 ## What it does
 
-- **Races against AI teams** on 20 real climbs and routes: Alpe d'Huez, Mont Ventoux, Stelvio, the finale of Liège–Bastogne–Liège and more. The routes are built from OpenStreetMap roads and real elevation data. The race has a full peloton with drafting, attacks and team orders, and you pick your role: sprinter, climber, rouleur or domestique.
+- **Races against AI teams** on 21 real climbs and routes: Alpe d'Huez, Mont Ventoux, Stelvio, the finale of Liège–Bastogne–Liège, Tokyo to the Wada Pass and more. The routes are built from OpenStreetMap roads and real elevation data. The race has a full peloton with drafting, attacks and team orders, and you pick your role: sprinter, climber, rouleur or domestique.
 - **Watch a race.** No trainer needed: *Watch this race* on the start screen lets the AI ride the whole race while you follow any rider. Pick one from the race order or step through it with the arrow keys and Tab. The quiet stretches fast-forward and the attacks and the finale play at real speed.
 - **Workouts in ERG mode.** A library of proven sessions (Rønnestad 30/15, Seiler 4×8, Norwegian 4×4, sweet spot, threshold, a ramp test that sets your FTP), with a live timeline, coaching and a summary at the end.
 - **Build your own workouts.** Stack blocks (steady, ramp, intervals, free ride) in watts or % FTP, with a live profile, duration, TSS, IF and NP as you go. Ready-made parts (warm-up, 4 × 4, 30/15s, sweet spot…), one-click zones, undo, and any library workout can be copied and tweaked. Export to Zwift's `.zwo` format, or drop a `.zwo` file on the window to import it.
@@ -74,7 +74,7 @@ tools/          scripts that build the routes, the map data and the macOS app
 ## Credits and data
 
 - Map and road data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, available under the ODbL.
-- Elevation: EU-DEM v1.1 © European Union, Copernicus. Terrain tiles by Mapzen/Tilezen on AWS Open Data.
+- Elevation: EU-DEM v1.1 © European Union, Copernicus. Japan: elevation tiles © Geospatial Information Authority of Japan (GSI). Terrain tiles by Mapzen/Tilezen on AWS Open Data.
 - Fonts: Lilita One © Juan Montoreano and Varela Round © The Varela Round Project Authors, both under the SIL Open Font License (`assets/fonts/OFL-*.txt`).
 - The Zwift Click and trainer message formats were documented by the open-source projects [incyclist/devices](https://github.com/incyclist/devices) and [qdomyos-zwift](https://github.com/cagnulein/qdomyos-zwift).
 

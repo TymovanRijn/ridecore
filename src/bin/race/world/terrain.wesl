@@ -9,7 +9,7 @@ import bevy_pbr::render::{
 };
 
 struct Surface {
-    // snow line (m), tree line (m), mode (0 ground, 1 road), unused
+    // snow line (m), tree line (m), mode (0 ground, 1 road), wooded slopes (1)
     params: vec4<f32>,
 }
 
@@ -131,7 +131,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         // even where it's flat.
         let sat = max(base.r, max(base.g, base.b)) - min(base.r, min(base.g, base.b));
         let grey = smoothstep(0.09, 0.04, sat) * smoothstep(0.2, 0.3, lum);
-        let rock_mask = max(1.0 - smoothstep(rocky_line - 0.06, rocky_line + 0.04, slope), grey * 0.9);
+        var rock_mask = max(1.0 - smoothstep(rocky_line - 0.06, rocky_line + 0.04, slope), grey * 0.9);
+        // Wooded slopes: the trees hold on up to the cliffs.
+        rock_mask *= 1.0 - surface.params.w * forest * smoothstep(0.5, 0.62, slope);
         color = ground;
         let dx = dpdx(p);
         let dy = dpdy(p);

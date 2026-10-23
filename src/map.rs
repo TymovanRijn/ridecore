@@ -44,6 +44,8 @@ pub enum BuildingKind {
     Church,
     /// Sheds, barns, warehouses, shops: big and plain.
     Shed,
+    /// Japanese temples and shrine halls.
+    Temple,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +77,8 @@ pub struct SideRoad {
 pub struct Place {
     pub name: String,
     pub pos: [f32; 2],
-    /// "town", "village", "hamlet", "suburb", "city" or "peak".
+    /// "town", "village", "hamlet", "suburb", "city", "peak" or "shrine"
+    /// (a Shinto shrine, whose torii stands by the road).
     pub kind: String,
 }
 
@@ -126,6 +129,7 @@ impl MapData {
                 kind: match b[1] as u32 {
                     1 => BuildingKind::Church,
                     2 => BuildingKind::Shed,
+                    3 => BuildingKind::Temple,
                     _ => BuildingKind::House,
                 },
                 footprint: pairs(&b[2..]),

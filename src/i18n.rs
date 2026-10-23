@@ -141,6 +141,7 @@ pub fn place(s: &str) -> String {
         ("Zuid-Holland", "South Holland"),
         ("Wallonië", "Wallonia"),
         ("Gegenereerd", "Generated"),
+        ("Tokio", "Tokyo"),
     ];
     let mut out = s.to_string();
     for (nl, en) in MAP {

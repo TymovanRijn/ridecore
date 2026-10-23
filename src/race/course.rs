@@ -54,9 +54,11 @@ pub struct Climb {
 }
 
 /// Famous climbs, found by their summit (lat, lon).
-const FAMOUS: [(&str, f64, f64); 2] = [
+const FAMOUS: [(&str, f64, f64); 4] = [
     ("Côte de La Redoute", 50.4889, 5.6949),
     ("Côte de la Roche-aux-Faucons", 50.5496, 5.5752),
+    ("Ōtarumi-tōge", 35.6207, 139.2278),
+    ("Wada-tōge", 35.6577, 139.1685),
 ];
 
 /// A name for the climb that tops out at lap distance `top`: a famous one,
@@ -310,6 +312,12 @@ pub fn find_climbs(route: &Route) -> Vec<Climb> {
             let end = pts[pk].0;
             // Start where the road actually starts to rise.
             while start + 100.0 < end && grade(start, start + 100.0) < 2.0 {
+                start += 25.0;
+            }
+            // A long false flat into it (a town's avenue rising at 1 to
+            // 2%) would water the climb down to nothing: it starts where it
+            // averages a climb's grade to the top.
+            while start + CLIMB_MIN_LENGTH_M < end && grade(start, end) < CLIMB_MIN_AVG_PCT {
                 start += 25.0;
             }
             let length = end - start;
@@ -644,6 +652,31 @@ mod named_climbs {
                 .iter()
                 .any(|n| n.as_deref() == Some("Côte de la Roche-aux-Faucons"))
         );
+    }
+
+    #[test]
+    fn tokyo_to_the_wada_pass_is_50_km_with_under_1000_m_of_climbing() {
+        let r = crate::route::real_routes()
+            .iter()
+            .find(|r| r.id == "tokyo-wada")
+            .unwrap();
+        assert!(
+            (49_500.0..51_000.0).contains(&r.length_m()),
+            "{}",
+            r.length_m()
+        );
+        assert!(r.gain_m() < 1000.0, "{}", r.gain_m());
+        // Starts low in Fuchū and finishes on the pass at 689 m.
+        assert!(r.points[0].1 < 70.0);
+        assert!((r.points.last().unwrap().1 - 689.0).abs() < 15.0);
+        let names: Vec<Option<String>> =
+            super::find_climbs(r).into_iter().map(|c| c.name).collect();
+        for pass in ["Ōtarumi-tōge", "Wada-tōge"] {
+            assert!(
+                names.iter().any(|n| n.as_deref() == Some(pass)),
+                "{names:?}"
+            );
+        }
     }
 }
 

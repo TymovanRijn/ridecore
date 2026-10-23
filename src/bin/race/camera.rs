@@ -254,7 +254,8 @@ fn spawn_camera(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         },
         // Far enough to see the mountains on the horizon.
         Projection::Perspective(PerspectiveProjection {
-            far: 60_000.0,
+            // Far enough for Mount Fuji from Tokyo.
+            far: 150_000.0,
             ..default()
         }),
         Transform::from_xyz(0.0, 30.0, 60.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -271,6 +272,8 @@ fn spawn_camera(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 /// How far you can see on most courses; real mountain ranges get clearer air.
 pub const HAZY_M: f32 = 3800.0;
 pub const CLEAR_M: f32 = 18_000.0;
+/// A crisp autumn day: mountains standing out 50 to 80 km away.
+pub const CRISP_M: f32 = 110_000.0;
 
 /// Air: distant hills turn blue and fade into the haze, so the view
 /// doesn't run on for ever. Mist and evening haze shorten the view.

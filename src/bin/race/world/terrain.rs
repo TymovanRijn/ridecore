@@ -41,9 +41,12 @@ pub fn setup(app: &mut App) {
 }
 
 /// The ground, road and scenery materials for one world.
+/// `wooded_slopes`: woods grow up the steepest slopes (Japan), so only
+/// cliffs show bare rock where the ground is wooded.
 pub fn materials(
     images: &mut Assets<Image>,
     surfaces: &mut Assets<Surface>,
+    wooded_slopes: bool,
 ) -> [Handle<Surface>; 3] {
     let grain = images.add(grain_texture());
     let rock = images.add(rock_texture());
@@ -56,7 +59,12 @@ pub fn materials(
                 ..default()
             },
             extension: SurfaceExt {
-                params: Vec4::new(SNOW_LINE_M, TREE_LINE_M, mode, 0.0),
+                params: Vec4::new(
+                    SNOW_LINE_M,
+                    TREE_LINE_M,
+                    mode,
+                    if wooded_slopes { 1.0 } else { 0.0 },
+                ),
                 grain: grain.clone(),
                 rock: rock.clone(),
             },

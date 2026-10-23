@@ -18,6 +18,11 @@ tools/cache/ so reruns are cheap.
 Data: © OpenStreetMap contributors (ODbL).
 
 Usage: python3 tools/fetch_map.py <route-id> [...]
+       python3 tools/fetch_map.py --pbf <extract.osm.pbf> <route-id> [...]
+
+With --pbf the map comes from a downloaded extract (Geofabrik) instead of
+Overpass, for when the servers are busy; that needs pyosmium
+(pip install osmium).
 """
 
 import hashlib
@@ -88,7 +93,7 @@ def overpass(query, must_find=False):
             with urllib.request.urlopen(req, timeout=300) as r:
                 out = json.load(r)
             if must_find and not out.get("elements"):
-                raise RuntimeError("empty answer")
+                raise RuntimeError(f"empty answer {out.get('remark', '')[:120]}")
             break
         except Exception as e:
             wait = 20 * (attempt + 1)
@@ -100,6 +105,97 @@ def overpass(query, must_find=False):
         json.dump(out, f)
     time.sleep(2)
     return out
+
+
+# Places the map has only as districts or stations, for the captions.
+EXTRA_PLACES = {
+    "tokyo-wada": [
+        ("Takao", 35.6417, 139.2816, "town"),
+        ("Sagamiko", 35.6170, 139.1894, "town"),
+        ("Fujino", 35.6155, 139.1520, "town"),
+    ],
+}
+
+
+def built_up(raster, buildings, roads):
+    """Japanese mappers rarely draw residential areas: town is where the
+    houses and the residential streets are. Fills unmapped cells only."""
+    def paint(x, z, r):
+        k = int(r / CELL_M) + 1
+        ci, cj = int((x - raster.x0) / CELL_M), int((z - raster.z0) / CELL_M)
+        for i in range(ci - k, ci + k + 1):
+            for j in range(cj - k, cj + k + 1):
+                if 0 <= i < raster.nx and 0 <= j < raster.nz and (i - ci) ** 2 + (j - cj) ** 2 <= k * k:
+                    if raster.cells[j * raster.nx + i] == UNKNOWN:
+                        raster.cells[j * raster.nx + i] = TOWN
+    for b in buildings:
+        xs, zs = b[2::2], b[3::2]
+        paint(sum(xs) / len(xs), sum(zs) / len(zs), 35.0)
+    for road in roads:
+        if road[0] != 2:
+            continue
+        pts = list(zip(road[2::2], road[3::2]))
+        for (ax, az), (bx, bz) in zip(pts, pts[1:]):
+            n = max(1, int(math.hypot(bx - ax, bz - az) / 15.0))
+            for s in range(n + 1):
+                paint(ax + (bx - ax) * s / n, az + (bz - az) * s / n, 30.0)
+
+
+def wooded_hills(raster, area):
+    """Nearly all of Japan's hills are wooded, but few of the woods are
+    mapped: unmapped slopes and heights get forest."""
+    s, i0, j0, ni = area["spacing_m"], area["i0"], area["j0"], area["ni"]
+    hs = area["heights"]
+
+    def h(x, z):
+        fx, fz = x / s - i0, z / s - j0
+        i, j = max(0, min(ni - 2, int(fx))), max(0, min(area["nj"] - 2, int(fz)))
+        tx, tz = fx - i, fz - j
+        a, b = hs[j * ni + i], hs[j * ni + i + 1]
+        c, d = hs[(j + 1) * ni + i], hs[(j + 1) * ni + i + 1]
+        return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz
+
+    n = 0
+    for j in range(raster.nz):
+        z = raster.z0 + (j + 0.5) * CELL_M
+        for i in range(raster.nx):
+            k = j * raster.nx + i
+            if raster.cells[k] != UNKNOWN:
+                continue
+            x = raster.x0 + (i + 0.5) * CELL_M
+            slope = math.hypot(h(x + 30, z) - h(x - 30, z), h(x, z + 30) - h(x, z - 30)) / 60.0
+            if slope > 0.12 or h(x, z) > 230.0:
+                raster.cells[k] = FOREST
+                n += 1
+    print(f"  {n} unmapped hillside cells wooded")
+
+
+def chunked_query(line, make, must_find=False, size=12):
+    """Runs a query per stretch of road (`make` builds it from an around
+    filter's polyline) and merges the answers: one query for a long route
+    through a city is too much for the servers."""
+    seen, elements = set(), []
+    for k in range(0, max(1, len(line) - 1), size):
+        part = line[k : k + size + 1]
+        for el in overpass(make(part), must_find=must_find)["elements"]:
+            key = (el["type"], el["id"])
+            if key not in seen:
+                seen.add(key)
+                elements.append(el)
+    return {"elements": elements}
+
+
+def latin_name(tags):
+    """The place's name in Latin letters (romaji for Japan), as the game's
+    fonts have no kanji."""
+    name = tags.get("name", "")
+    if all(ord(c) < 0x2000 for c in name):
+        return name
+    for key in ("name:ja-Latn", "name:ja_rm", "name:en"):
+        if tags.get(key):
+            # "Hachiōji-shi" is the city of Hachiōji.
+            return tags[key].removesuffix("-shi")
+    return None
 
 
 def haversine(a, b):
@@ -218,7 +314,59 @@ ROAD_CLASS = {
 }
 
 
-def build(route_id):
+def from_pbf(path, south, west, north, east):
+    """Everything the map needs inside a box, read from an OSM extract and
+    shaped like Overpass `out geom` answers: (cover elements, near
+    elements). Land cover areas come assembled (ways and multipolygons
+    alike) as relations with closed outer and inner rings."""
+    import osmium
+
+    def inside(lat, lon):
+        return south <= lat <= north and west <= lon <= east
+
+    def geometry(nodes):
+        return [{"lat": n.lat, "lon": n.lon} for n in nodes if n.location.valid()]
+
+    cover, near = [], []
+    fp = (
+        osmium.FileProcessor(path)
+        .with_locations()
+        .with_areas(osmium.filter.KeyFilter("landuse", "natural", "leisure", "waterway"))
+        .with_filter(osmium.filter.KeyFilter("landuse", "natural", "leisure", "waterway", "building", "highway", "place", "religion"))
+    )
+    for o in fp:
+        tags = dict(o.tags)
+        if o.is_node():
+            if inside(o.location.lat, o.location.lon):
+                near.append({"type": "node", "id": o.id, "lat": o.location.lat, "lon": o.location.lon, "tags": tags})
+        elif o.is_way():
+            g = geometry(o.nodes)
+            if not any(inside(p["lat"], p["lon"]) for p in g):
+                continue
+            el = {"type": "way", "id": o.id, "tags": tags, "geometry": g}
+            if tags.get("waterway") in ("river", "canal"):
+                cover.append(el)
+            if "building" in tags or "highway" in tags or tags.get("religion") == "shinto":
+                near.append(el)
+        elif o.is_area():
+            members = []
+            for outer in o.outer_rings():
+                ring = geometry(outer)
+                if not any(inside(p["lat"], p["lon"]) for p in ring):
+                    # A big wood around the whole box still covers it.
+                    lats = [p["lat"] for p in ring]
+                    lons = [p["lon"] for p in ring]
+                    if not ring or max(lats) < south or min(lats) > north or max(lons) < west or min(lons) > east:
+                        continue
+                members.append({"type": "way", "role": "outer", "geometry": ring})
+                for inner in o.inner_rings(outer):
+                    members.append({"type": "way", "role": "inner", "geometry": geometry(inner)})
+            if members:
+                cover.append({"type": "relation", "id": o.id, "tags": tags, "members": members})
+    return {"elements": cover}, {"elements": near}
+
+
+def build(route_id, pbf=None):
     with open(os.path.join(ROUTES, route_id + ".json")) as f:
         r = json.load(f)
     lat0, lon0 = r["origin"]
@@ -226,6 +374,50 @@ def build(route_id):
 
     def project(lat, lon):
         return [round((lon - lon0) * cos0 * M_PER_DEG_LON, 1), round((lat0 - lat) * M_PER_DEG_LAT, 1)]
+
+    def unproject(x, z):
+        return lat0 - z / M_PER_DEG_LAT, lon0 + x / (cos0 * M_PER_DEG_LON)
+
+    def within(near, line):
+        """The Overpass `around` filters of the near query, on local data:
+        buildings, roads and shrines close to the road, places further out."""
+        road = [project(lat, lon) for lat, lon in thin(line, 60.0)]
+        bucket = 500.0
+        grid = {}
+        for x, z in road:
+            grid.setdefault((int(x // bucket), int(z // bucket)), []).append((x, z))
+
+        def dist(lat, lon):
+            x, z = project(lat, lon)
+            i, j = int(x // bucket), int(z // bucket)
+            best = 1e9
+            for di in range(-7, 8):
+                for dj in range(-7, 8):
+                    for px, pz in grid.get((i + di, j + dj), ()):
+                        best = min(best, math.hypot(px - x, pz - z))
+            return best
+
+        out = []
+        for el in near["elements"]:
+            tags = el.get("tags", {})
+            pts = [(el["lat"], el["lon"])] if el["type"] == "node" else [(p["lat"], p["lon"]) for p in el["geometry"]]
+            if tags.get("religion") == "shinto" and tags.get("amenity") == "place_of_worship":
+                reach = 160
+            elif el["type"] == "node":
+                if not (tags.get("place") in ("city", "town", "village", "hamlet", "suburb") or tags.get("natural") == "peak"):
+                    continue
+                reach = 3000
+            elif "building" in tags:
+                reach = BUILDING_REACH_M
+            elif tags.get("highway") in ROAD_CLASS:
+                reach = ROAD_REACH_M
+            else:
+                continue
+            # Check a few vertices: enough for footprints and road pieces.
+            step = max(1, len(pts) // 8)
+            if any(dist(lat, lon) <= reach for lat, lon in pts[::step] + pts[-1:]):
+                out.append(el)
+        return {"elements": out}
 
     pts = [(p[0], p[1]) for p in r["points"]]
     line = thin(pts, 250.0)
@@ -236,7 +428,8 @@ def build(route_id):
     w, h = (a["ni"] - 1) * a["spacing_m"], (a["nj"] - 1) * a["spacing_m"]
     raster = Raster(x0, z0, int(w / CELL_M), int(h / CELL_M))
 
-    q_cover = f"""[out:json][timeout:300];
+    def q_cover(line):
+        return f"""[out:json][timeout:300];
 (
   way["landuse"]{around(line, COVER_REACH_M)};
   relation["landuse"]{around(line, COVER_REACH_M)};
@@ -247,7 +440,26 @@ def build(route_id):
   relation["waterway"="river"]{around(line, COVER_REACH_M)};
 );
 out geom;"""
-    cover = overpass(q_cover, must_find=True)
+
+    if pbf:
+        # The map's box, and room around it for the places named nearby.
+        south, west = unproject(raster.x0 - 3000, raster.z0 + raster.nz * CELL_M + 3000)
+        north, east = unproject(raster.x0 + raster.nx * CELL_M + 3000, raster.z0 - 3000)
+        cached = os.path.join(CACHE, f"pbf_{route_id}.json")
+        if os.path.exists(cached):
+            with open(cached) as f:
+                cover, pbf_near = json.load(f)
+        else:
+            print(f"  reading {pbf} for {south:.4f},{west:.4f} .. {north:.4f},{east:.4f}")
+            cover, pbf_near = from_pbf(pbf, south, west, north, east)
+            with open(cached, "w") as f:
+                json.dump([cover, pbf_near], f)
+    # Long routes go in stretches; the short ones keep their single
+    # (cached) query.
+    elif len(line) > 60:
+        cover = chunked_query(line, q_cover, must_find=True)
+    else:
+        cover = overpass(q_cover(line), must_find=True)
     areas, rivers = [], []
     for el in cover["elements"]:
         tags = el.get("tags", {})
@@ -283,36 +495,72 @@ out geom;"""
         raster.stroke(geom, width, WATER)
     print(f"  {len(areas)} land cover areas, {len(rivers)} river lines")
 
-    q_near = f"""[out:json][timeout:300];
+    def q_near(line):
+        return f"""[out:json][timeout:300];
 (
   way["building"]{around(line, BUILDING_REACH_M)};
   way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|track)$"]{around(line, ROAD_REACH_M)};
   node["place"~"^(city|town|village|hamlet|suburb)$"]{around(line, 3000)};
   node["natural"="peak"]{around(line, 3000)};
+  nwr["amenity"="place_of_worship"]["religion"="shinto"]{around(line, 160)};
 );
 out geom;"""
-    near = overpass(q_near)
+
+    if pbf:
+        near = within(pbf_near, line)
+    else:
+        near = chunked_query(line, q_near) if len(line) > 60 else overpass(q_near(line))
     buildings, roads, places = [], [], []
     for el in near["elements"]:
         tags = el.get("tags", {})
+        if tags.get("religion") == "shinto":
+            # A shrine: its torii stands by the road.
+            if el["type"] == "node":
+                xz = project(el["lat"], el["lon"])
+            elif el.get("geometry"):
+                g = [project(p["lat"], p["lon"]) for p in el["geometry"]]
+                xz = [sum(p[0] for p in g) / len(g), sum(p[1] for p in g) / len(g)]
+            elif el.get("bounds"):
+                b = el["bounds"]
+                xz = project((b["minlat"] + b["maxlat"]) / 2, (b["minlon"] + b["maxlon"]) / 2)
+            else:
+                xz = None
+            if xz is not None:
+                places.append([latin_name(tags) or "", xz[0], xz[1], "shrine"])
+            if el["type"] != "way" or "building" not in tags:
+                continue
         if el["type"] == "node":
-            name = tags.get("name")
+            name = latin_name(tags)
             if name:
                 xz = project(el["lat"], el["lon"])
                 kind = tags.get("place") or tags.get("natural")
                 places.append([name, xz[0], xz[1], kind])
             continue
+        if el["type"] != "way":
+            continue
         geom = [project(p["lat"], p["lon"]) for p in el.get("geometry", [])]
         if "building" in tags and len(geom) >= 4:
             levels = tags.get("building:levels", "")
             levels = int(float(levels)) if levels.replace(".", "").isdigit() else 0
+            height = tags.get("height", "").split(" ")[0]
+            if not levels and height.replace(".", "").isdigit():
+                levels = max(1, round(float(height) / 3.2))
             kind = tags["building"]
             k = 1 if kind in ("church", "chapel", "cathedral") else 2 if kind in ("industrial", "warehouse", "barn", "farm_auxiliary", "shed", "garage", "garages", "retail", "commercial") else 0
+            if kind in ("temple", "shrine") or tags.get("amenity") == "place_of_worship" and tags.get("religion") in ("shinto", "buddhist"):
+                k = 3
             ring = geom[:-1] if geom[0] == geom[-1] else geom
             buildings.append([levels, k] + [c for p in ring for c in p])
         elif "highway" in tags and len(geom) >= 2:
+            if tags["highway"] not in ROAD_CLASS:
+                continue
             cls, width = ROAD_CLASS[tags["highway"]]
             roads.append([cls, width] + [c for p in geom for c in p])
+    for name, lat, lon, kind in EXTRA_PLACES.get(route_id, []):
+        places.append([name, *project(lat, lon), kind])
+    if r.get("style") == "japan":
+        built_up(raster, buildings, roads)
+        wooded_hills(raster, r["area"])
     print(f"  {len(buildings)} buildings, {len(roads)} roads, {len(places)} places")
 
     out = {
@@ -350,5 +598,9 @@ def polygon_area(ring):
 
 if __name__ == "__main__":
     os.makedirs(CACHE, exist_ok=True)
-    for rid in sys.argv[1:] or ["lbl-finale"]:
-        build(rid)
+    args = sys.argv[1:]
+    pbf = None
+    if args[:1] == ["--pbf"]:
+        pbf, args = args[1], args[2:]
+    for rid in args or ["lbl-finale"]:
+        build(rid, pbf)
